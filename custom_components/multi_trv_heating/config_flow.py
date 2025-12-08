@@ -14,7 +14,9 @@ DOMAIN = "multi_trv_heating"
 CONF_ENTITY_ID = "entity_id"                              # Climate entity to control
 CONF_NAME = "name"                                        # Zone name
 CONF_AREA = "area"                                        # Zone floor area in m²
-CONF_PRIORITY = "priority"                                # Zone priority (0.0-1.0)
+CONF_PRIORITY = "is_high_priority"                        # Zone priority (boolean: True=high, False=low)
+CONF_TRV_POSITION_ENTITY_ID = "trv_position_entity_id"    # TRV position sensor entity
+CONF_TEMP_CALIBRATION_ENTITY_ID = "temp_calib_entity_id"  # Temperature calibration (offset) number entity
 CONF_EXT_TEMP_ENTITY_ID = "ext_temp_entity_id"            # Optional external temperature entity
 
 # Define the data schema for the zone configuration
@@ -28,15 +30,23 @@ DATA_SCHEMA = vol.Schema({
     vol.Optional(CONF_NAME): str,
     vol.Optional(CONF_AREA, default=0.0): vol.Coerce(float),
     
-    # Priority weighting: controls how much this zone influences boiler decisions
-    # 1.0 = normal (default), 0.5 = half importance, 0.1 = low importance
-    vol.Optional(CONF_PRIORITY, default=1.0): vol.All(
-        vol.Coerce(float), 
-        vol.Range(min=0.0, max=1.0)
+    # Priority: boolean True=high priority (triggers at any opening), False=low priority (needs 100%)
+    vol.Optional(CONF_PRIORITY, default=True): bool,
+    
+    # TRV valve position sensor (e.g., sensor.radiator_1_bedroom_position)
+    # Reports 0-100% valve opening
+    vol.Required(CONF_TRV_POSITION_ENTITY_ID): selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="sensor")
     ),
     
-    # Optional external temperature entity for outdoor temperature compensation
-    # Typically a sensor entity that reports the current outdoor temperature
+    # Temperature calibration (offset) number entity (e.g., number.radiator_1_bedroom_local_temperature_calibration)
+    # Allows adjusting TRV's temperature reading to make it open/close more
+    vol.Required(CONF_TEMP_CALIBRATION_ENTITY_ID): selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="number")
+    ),
+    
+    # Optional external temperature entity for better temperature readings
+    # Useful when TRV is mounted near radiator and gives inaccurate readings
     vol.Optional(CONF_EXT_TEMP_ENTITY_ID): selector.EntitySelector(
         selector.EntitySelectorConfig(domain="sensor")
     ),
@@ -72,13 +82,13 @@ class OpenThermConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         Handle the initial step when user adds the component.
         
         Presents form to configure a zone:
-        - Select a climate entity (required) - the TRV valve
+        - Select a climate entity (required) - the TRV thermostat
         - Enter zone name (optional, defaults to entity name)
         - Enter floor area in m² (optional)
-        - Set priority weight 0.0-1.0 (optional, defaults to 1.0)
-          * Values > 0.5 = high priority (triggers at 25% opening)
-          * Values <= 0.5 = low priority (needs 100% opening or aggregates)
-        - Select optional external temperature sensor
+        - Set priority (required boolean) - True=high priority (any opening), False=low priority (needs 100%)
+        - Select TRV position sensor (required) - e.g., sensor.radiator_1_bedroom_position
+        - Select temperature calibration entity (required) - e.g., number.radiator_1_bedroom_local_temperature_calibration
+        - Select optional external temperature sensor - for more accurate room readings
         
         Args:
             user_input: Dictionary of user input from form

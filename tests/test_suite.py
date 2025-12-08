@@ -102,9 +102,9 @@ class TestSuite:
                 entity_id="climate.living_room",
                 name="Living Room",
                 floor_area_m2=35.0,
-                priority=1.0  # High priority
+                is_high_priority=True  # High priority
             )
-            self.log.debug(f"Zone created: {zone.name}, priority={zone.priority}")
+            self.log.debug(f"Zone created: {zone.name}, high_priority={zone.is_high_priority}")
             
             self.log.step(2, "Update zone to 2°C below target with 25% valve opening")
             state = MockState(
@@ -155,7 +155,7 @@ class TestSuite:
             zone = ZoneWrapper(
                 entity_id="climate.bedroom",
                 name="Bedroom",
-                priority=1.0
+                is_high_priority=True
             )
             
             self.log.step(2, "Update zone to 8°C below target with 100% valve opening")
@@ -203,25 +203,25 @@ class TestSuite:
             zone = ZoneWrapper(
                 entity_id="climate.lounge",
                 name="Lounge",
-                priority=1.0  # High priority (> 0.5)
+                is_high_priority=True  # High priority (> 0.5)
             )
             
-            self.log.step(2, "Test 24% opening (should NOT trigger)")
-            zone.update_trv_opening(24.0)
-            self.log.verify(not zone.is_demanding_heat, "24% opening should not trigger")
-            self.log.debug(f"24% opening: is_demanding={zone.is_demanding_heat}")
+            self.log.step(2, "Test 1% opening (should trigger with new ANY > 0% logic)")
+            zone.update_trv_opening(1.0)
+            self.log.verify(zone.is_demanding_heat, "1% opening should trigger (high-priority)")
+            self.log.debug(f"1% opening: is_demanding={zone.is_demanding_heat}")
             
-            self.log.step(3, "Test 25% opening (should trigger)")
-            zone.update_trv_opening(25.0)
-            self.log.verify(zone.is_demanding_heat, "25% opening should trigger")
-            self.log.debug(f"25% opening: is_demanding={zone.is_demanding_heat}")
+            self.log.step(3, "Test 24% opening (should trigger)")
+            zone.update_trv_opening(24.0)
+            self.log.verify(zone.is_demanding_heat, "24% opening should trigger (high-priority)")
+            self.log.debug(f"24% opening: is_demanding={zone.is_demanding_heat}")
             
             self.log.step(4, "Test 100% opening (should trigger)")
             zone.update_trv_opening(100.0)
             self.log.verify(zone.is_demanding_heat, "100% opening should trigger")
             self.log.debug(f"100% opening: is_demanding={zone.is_demanding_heat}")
             
-            self.log.info("Test PASSED: High-priority trigger at 25% works correctly")
+            self.log.info("Test PASSED: High-priority trigger at ANY > 0% works correctly")
             self.passed_tests += 1
             
         except AssertionError as e:
@@ -246,7 +246,7 @@ class TestSuite:
             zone = ZoneWrapper(
                 entity_id="climate.guest_room",
                 name="Guest Room",
-                priority=0.3  # Low priority (<= 0.5)
+                is_high_priority=False  # Low priority (<= 0.5)
             )
             self.log.verify(not zone.is_high_priority, "Zone should be low priority")
             
@@ -289,8 +289,8 @@ class TestSuite:
         
         try:
             self.log.step(1, "Create two high-priority zones")
-            zone1 = ZoneWrapper("climate.room1", "Room 1", priority=1.0)
-            zone2 = ZoneWrapper("climate.room2", "Room 2", priority=0.8)
+            zone1 = ZoneWrapper("climate.room1", "Room 1", is_high_priority=True)
+            zone2 = ZoneWrapper("climate.room2", "Room 2", is_high_priority=True)
             
             self.log.step(2, "Set zone1: 3°C below target, 30% opening")
             state1 = MockState("climate.room1", "heating", {
@@ -341,9 +341,9 @@ class TestSuite:
         
         try:
             self.log.step(1, "Create three low-priority zones")
-            zone1 = ZoneWrapper("climate.guest1", "Guest 1", priority=0.3)
-            zone2 = ZoneWrapper("climate.guest2", "Guest 2", priority=0.2)
-            zone3 = ZoneWrapper("climate.hallway", "Hallway", priority=0.1)
+            zone1 = ZoneWrapper("climate.guest1", "Guest 1", is_high_priority=False)
+            zone2 = ZoneWrapper("climate.guest2", "Guest 2", is_high_priority=False)
+            zone3 = ZoneWrapper("climate.hallway", "Hallway", is_high_priority=False)
             
             self.log.step(2, "Set zone1 to 30% opening")
             zone1.update_trv_opening(30.0)
@@ -384,10 +384,10 @@ class TestSuite:
         
         try:
             self.log.step(1, "Create high-priority zone")
-            high = ZoneWrapper("climate.living", "Living Room", priority=1.0)
+            high = ZoneWrapper("climate.living", "Living Room", is_high_priority=True)
             
             self.log.step(2, "Create low-priority zone")
-            low = ZoneWrapper("climate.storage", "Storage", priority=0.2)
+            low = ZoneWrapper("climate.storage", "Storage", is_high_priority=False)
             
             self.log.step(3, "Set high-priority to 30% opening (should trigger)")
             high.update_trv_opening(30.0)
@@ -471,9 +471,9 @@ class TestSuite:
         
         try:
             self.log.step(1, "Create multiple zones")
-            zone1 = ZoneWrapper("climate.r1", "Room 1", priority=1.0)
-            zone2 = ZoneWrapper("climate.r2", "Room 2", priority=0.5)
-            zone3 = ZoneWrapper("climate.r3", "Room 3", priority=0.2)
+            zone1 = ZoneWrapper("climate.r1", "Room 1", is_high_priority=True)
+            zone2 = ZoneWrapper("climate.r2", "Room 2", is_high_priority=False)
+            zone3 = ZoneWrapper("climate.r3", "Room 3", is_high_priority=False)
             
             self.log.step(2, "Set all zones to 0% opening")
             zone1.update_trv_opening(0.0)
@@ -516,24 +516,24 @@ class TestSuite:
         
         try:
             self.log.step(1, "Create zone with default offset 0")
-            zone = ZoneWrapper("climate.room", "Test Room", priority=1.0)
+            zone = ZoneWrapper("climate.room", "Test Room", is_high_priority=True)
             self.log.verify(zone.temperature_offset == 0.0, "Initial offset should be 0")
             self.log.debug(f"Initial offset: {zone.temperature_offset}°C")
             
-            self.log.step(2, "Set offset to -2.0°C")
-            zone.set_temperature_offset(-2.0)
-            self.log.verify(zone.temperature_offset == -2.0, "Offset should be -2.0")
-            self.log.debug(f"New offset: {zone.temperature_offset}°C")
+            self.log.step(2, "Open valve - offset should change to -2.0°C automatically")
+            zone.update_trv_opening(50.0)  # Open valve
+            self.log.verify(zone.temperature_offset == -2.0, "Offset should be -2.0 when valve opens")
+            self.log.debug(f"Offset when open: {zone.temperature_offset}°C")
             
-            self.log.step(3, "Test offset clamping (should clamp to -5 min)")
-            zone.set_temperature_offset(-10.0)  # Try to set below minimum
-            self.log.verify(zone.temperature_offset == -5.0, "Offset should be clamped to -5.0")
-            self.log.debug(f"Clamped offset: {zone.temperature_offset}°C")
+            self.log.step(3, "Close valve - offset should reset to 0°C")
+            zone.update_trv_opening(0.0)  # Close valve
+            self.log.verify(zone.temperature_offset == 0.0, "Offset should be 0 when valve closes")
+            self.log.debug(f"Offset when closed: {zone.temperature_offset}°C")
             
-            self.log.step(4, "Test offset clamping (should clamp to +5 max)")
-            zone.set_temperature_offset(10.0)  # Try to set above maximum
-            self.log.verify(zone.temperature_offset == 5.0, "Offset should be clamped to +5.0")
-            self.log.debug(f"Clamped offset: {zone.temperature_offset}°C")
+            self.log.step(4, "Valve at 1% should trigger offset change")
+            zone.update_trv_opening(1.0)  # Minimal opening
+            self.log.verify(zone.temperature_offset == -2.0, "Offset should be -2.0 even at 1% opening")
+            self.log.debug(f"Offset at 1%: {zone.temperature_offset}°C")
             
             self.log.info("Test PASSED: Temperature offset adjustment works correctly")
             self.passed_tests += 1
@@ -555,21 +555,13 @@ class TestSuite:
         )
         
         try:
-            self.log.step(1, "Create zone and set offset to -3°C")
-            zone = ZoneWrapper("climate.room", "Test Room", priority=1.0)
-            zone.set_temperature_offset(-3.0)
-            self.log.verify(zone.temperature_offset == -3.0, "Offset set to -3°C")
+            self.log.step(1, "Create zone and open valve - offset should be -2°C")
+            zone = ZoneWrapper("climate.room", "Test Room", is_high_priority=True)
+            zone.update_trv_opening(50.0)  # Open valve
+            self.log.verify(zone.temperature_offset == -2.0, "Offset should be -2°C when open")
             
-            self.log.step(2, "Update zone to be AT target temperature")
-            state = MockState("climate.room", "heating", {
-                'current_temperature': 20.0,
-                'target_temperature': 20.0,
-            })
-            zone.update_from_state(state)
-            self.log.verify(zone.current_error == 0.0, "Error should be 0 (at target)")
-            
-            self.log.step(3, "Reset offset")
-            zone.reset_temperature_offset()
+            self.log.step(2, "Close valve - offset should reset to 0°C")
+            zone.update_trv_opening(0.0)  # Close valve
             self.log.verify(zone.temperature_offset == 0.0, "Offset should reset to 0")
             self.log.debug(f"Reset offset: {zone.temperature_offset}°C")
             
@@ -597,7 +589,7 @@ class TestSuite:
         
         try:
             self.log.step(1, "Create zone at target temperature")
-            zone = ZoneWrapper("climate.room", "Test Room", priority=1.0)
+            zone = ZoneWrapper("climate.room", "Test Room", is_high_priority=True)
             state = MockState("climate.room", "heating", {
                 'current_temperature': 21.0,
                 'target_temperature': 21.0,
@@ -636,11 +628,11 @@ class TestSuite:
         try:
             self.log.step(1, "Create 5 zones in different priority levels")
             zones = [
-                ZoneWrapper("climate.r1", "Room 1", priority=1.0),
-                ZoneWrapper("climate.r2", "Room 2", priority=0.8),
-                ZoneWrapper("climate.r3", "Room 3", priority=0.5),
-                ZoneWrapper("climate.r4", "Room 4", priority=0.3),
-                ZoneWrapper("climate.r5", "Room 5", priority=0.0),
+                ZoneWrapper("climate.r1", "Room 1", is_high_priority=True),
+                ZoneWrapper("climate.r2", "Room 2", is_high_priority=True),
+                ZoneWrapper("climate.r3", "Room 3", is_high_priority=False),
+                ZoneWrapper("climate.r4", "Room 4", is_high_priority=False),
+                ZoneWrapper("climate.r5", "Room 5", is_high_priority=False),
             ]
             
             self.log.step(2, "Set all zones to 0% opening")
@@ -681,7 +673,7 @@ class TestSuite:
         
         try:
             self.log.step(1, "Create zone at target")
-            zone = ZoneWrapper("climate.room", "Oscillating Room", priority=1.0)
+            zone = ZoneWrapper("climate.room", "Oscillating Room", is_high_priority=True)
             zone.update_trv_opening(75.0)
             
             temps = [20.0, 19.8, 20.1, 19.9, 20.0, 19.7, 20.2, 20.0]
@@ -736,10 +728,10 @@ class TestSuite:
         
         try:
             self.log.step(1, "Create 4 zones with realistic configuration")
-            living = ZoneWrapper("climate.living", "Living Room", priority=1.0, floor_area_m2=40.0)
-            bedroom = ZoneWrapper("climate.bedroom", "Bedroom", priority=0.9, floor_area_m2=25.0)
-            guest = ZoneWrapper("climate.guest", "Guest Room", priority=0.3, floor_area_m2=15.0)
-            hallway = ZoneWrapper("climate.hallway", "Hallway", priority=0.1, floor_area_m2=8.0)
+            living = ZoneWrapper("climate.living", "Living Room", is_high_priority=True, floor_area_m2=40.0)
+            bedroom = ZoneWrapper("climate.bedroom", "Bedroom", is_high_priority=True, floor_area_m2=25.0)
+            guest = ZoneWrapper("climate.guest", "Guest Room", is_high_priority=False, floor_area_m2=15.0)
+            hallway = ZoneWrapper("climate.hallway", "Hallway", is_high_priority=False, floor_area_m2=8.0)
             
             self.log.step(2, "Set Living Room: 22°C target, 20°C current, 40% valve")
             state = MockState("climate.living", "heating", {
@@ -829,8 +821,8 @@ class TestSuite:
         
         try:
             self.log.step(1, "Create two adjacent zones")
-            zone_a = ZoneWrapper("climate.living", "Living Room", priority=1.0)
-            zone_b = ZoneWrapper("climate.dining", "Dining Room", priority=1.0)
+            zone_a = ZoneWrapper("climate.living", "Living Room", is_high_priority=True)
+            zone_b = ZoneWrapper("climate.dining", "Dining Room", is_high_priority=True)
             
             self.log.step(2, "Set Zone A: demanding heat (2°C below, 50% open)")
             state_a = MockState("climate.living", "heating", {

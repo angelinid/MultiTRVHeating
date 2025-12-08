@@ -62,7 +62,8 @@ class ZoneWrapper:
     """
 
     def __init__(self, entity_id: str, name: str, floor_area_m2: float = 0.0,
-                 priority: float = 1.0, ext_temp_entity_id: Optional[str] = None) -> None:
+                 is_high_priority: bool = True, trv_position_entity_id: Optional[str] = None,
+                 temp_calib_entity_id: Optional[str] = None, ext_temp_entity_id: Optional[str] = None) -> None:
         """
         Initialize a zone wrapper.
         
@@ -70,7 +71,9 @@ class ZoneWrapper:
             entity_id: Home Assistant climate entity ID (e.g., "climate.living_room")
             name: User-friendly zone name
             floor_area_m2: Floor area in square meters (for demand calculation)
-            priority: Priority level - 1.0 = high priority, 0.0 = low priority
+            is_high_priority: Boolean - True=high priority (any opening), False=low priority (needs 100%)
+            trv_position_entity_id: TRV position sensor entity (e.g., "sensor.radiator_1_position")
+            temp_calib_entity_id: Temperature calibration number entity (e.g., "number.radiator_1_local_temperature_calibration")
             ext_temp_entity_id: Optional external temperature sensor entity ID
         """
         # ========== Zone Identification ==========
@@ -80,10 +83,9 @@ class ZoneWrapper:
         
         # ========== Priority Configuration ==========
         # Priority determines when this zone can trigger the boiler:
-        # - High priority (> 0.5): Can trigger boiler at 25% TRV opening
-        # - Low priority (<= 0.5): Needs 100% opening or aggregates with other low zones
-        self.priority = priority
-        self.is_high_priority = priority > 0.5
+        # - High priority (True): Can trigger boiler at any TRV opening (including 25%)
+        # - Low priority (False): Needs 100% opening or aggregates with other low zones
+        self.is_high_priority = is_high_priority
         
         # ========== Temperature Tracking ==========
         self.current_temp = 20.0  # Current room temperature (°C)
@@ -96,25 +98,25 @@ class ZoneWrapper:
         self.ext_temp_entity_id = ext_temp_entity_id
         self.ext_current_temp = 20.0  # External sensor reading (°C)
         
-        # ========== TRV Valve State ==========
+        # ========== TRV Valve State & Control ==========
+        # TRV position sensor: Tracks valve opening percentage (0-100%)
+        self.trv_position_entity_id = trv_position_entity_id
         self.trv_opening_percent = 0.0  # TRV valve opening: 0-100%
         self.is_demanding_heat = False  # True if zone needs heat from boiler
         
-        # ========== Temperature Offset Feature (Requirement #8) ==========
-        # This feature reduces the TRV's temperature offset to make it think it's colder
-        # This causes the valve to open more while boiler heat is being supplied
-        # When the zone reaches target temp, offset resets to 0
+        # Temperature calibration (offset) control: Adjusts TRV's temperature reading
+        # Entity ID for the number entity that controls TRV offset (-5 to +5°C typically)
+        self.temp_calib_entity_id = temp_calib_entity_id
         self.temperature_offset = DEFAULT_TEMP_OFFSET  # Current offset (-5 to +5)
-        self.temperature_offset_entity = None  # Will hold entity ID for TRV offset setting
         
         # ========== Heating Demand Logic ==========
         # Timestamp of last temperature change (used for stability analysis)
         self.last_update_time = time.time()
         
         _LOGGER.debug(
-            "Zone initialized: %s (entity=%s, area=%.1f m², priority=%.2f, %s)",
-            name, entity_id, floor_area_m2, priority,
-            f"high priority" if self.is_high_priority else "low priority"
+            "Zone initialized: %s (entity=%s, area=%.1f m², priority=%s, position_sensor=%s, calib_entity=%s)",
+            name, entity_id, floor_area_m2, "HIGH" if is_high_priority else "LOW",
+            trv_position_entity_id or "none", temp_calib_entity_id or "none"
         )
 
     def update_from_state(self, new_state) -> None:
@@ -168,9 +170,13 @@ class ZoneWrapper:
         Update the TRV valve opening percentage from sensor.
         
         The opening percentage is a key indicator of heating demand:
-        - High priority zones: Opening >= 25% triggers boiler
+        - High priority zones: Opening > 0% triggers boiler
         - Low priority zones: Opening >= 100% triggers boiler
         - Low priority zones can aggregate: Multiple zones at 50% = 100% demand
+        
+        Also manages temperature offset (Requirement #8):
+        - If valve opens: Set offset to -2.0°C (hardcoded) to encourage more opening
+        - If valve closes: Reset offset to 0°C
         
         Args:
             opening_percent: TRV valve opening (0-100%)
@@ -178,12 +184,24 @@ class ZoneWrapper:
         # Clamp to valid range
         self.trv_opening_percent = max(0.0, min(100.0, opening_percent))
         
+        # Manage temperature offset based on valve state
+        if self.trv_opening_percent > 0.0:
+            # Valve is open: Set negative offset to encourage more opening
+            if self.temperature_offset != -2.0:
+                self.temperature_offset = -2.0
+                _LOGGER.debug("Zone '%s': Valve opened, offset set to -2.0°C", self.name)
+        else:
+            # Valve is closed: Reset offset to 0
+            if self.temperature_offset != 0.0:
+                self.temperature_offset = 0.0
+                _LOGGER.debug("Zone '%s': Valve closed, offset reset to 0°C", self.name)
+        
         # Recalculate demand based on new opening percentage
         self._update_demand_metric()
         
         _LOGGER.debug(
-            "Zone '%s': TRV opening updated to %.0f%%",
-            self.name, self.trv_opening_percent
+            "Zone '%s': TRV opening updated to %.0f%%, offset=%.1f°C",
+            self.name, self.trv_opening_percent, self.temperature_offset
         )
 
     def update_external_temperature(self, external_temp: float) -> None:
@@ -193,6 +211,9 @@ class ZoneWrapper:
         This is used when a zone has an external temperature sensor to supplement
         or replace the TRV's built-in temperature reading, which can be unreliable
         if the TRV is mounted near a radiator.
+        
+        Note: Does NOT trigger _calculate_and_command - only position changes
+        and climate entity changes trigger boiler recalculation.
         
         Args:
             external_temp: Temperature reading from external sensor (°C)
@@ -208,7 +229,7 @@ class ZoneWrapper:
         Recalculate whether this zone is demanding heat from the boiler.
         
         Logic (Requirements #5, #6):
-        - High priority zones: Demand heat if opening >= 25%
+        - High priority zones: Demand heat if opening > 0% (any opening triggers demand)
         - Low priority zones: Demand heat if opening >= 100%
         
         This is then used by MasterController to:
@@ -218,8 +239,8 @@ class ZoneWrapper:
         """
         # Determine heating demand based on TRV opening and priority level
         if self.is_high_priority:
-            # High priority: Can trigger boiler with just 25% opening
-            self.is_demanding_heat = self.trv_opening_percent >= HIGH_PRIORITY_MIN_OPENING
+            # High priority: Can trigger boiler with any opening > 0%
+            self.is_demanding_heat = self.trv_opening_percent > 0.0
         else:
             # Low priority: Needs 100% opening to trigger on its own
             self.is_demanding_heat = self.trv_opening_percent >= LOW_PRIORITY_MIN_OPENING
@@ -273,43 +294,14 @@ class ZoneWrapper:
         
         return max(0.0, min(1.0, demand))
 
-    def set_temperature_offset(self, offset: float) -> None:
-        """
-        Set the TRV valve's temperature offset (Requirement #8).
-        
-        Temperature offset is a feature of some smart TRV valves that allows
-        adjusting their internal temperature reading. By reducing this offset
-        when heating is needed, we make the valve think it's colder than it is,
-        causing it to open more.
-        
-        Args:
-            offset: Temperature offset in °C, clamped to -5 to +5
-        """
-        # Clamp to valid range
-        self.temperature_offset = max(MIN_TEMP_OFFSET, min(MAX_TEMP_OFFSET, offset))
-        
-        _LOGGER.info(
-            "Zone '%s': Temperature offset set to %.1f°C",
-            self.name, self.temperature_offset
-        )
-
-    def reset_temperature_offset(self) -> None:
-        """
-        Reset the temperature offset to 0 (default state).
-        
-        Called when the zone reaches its target temperature, to stop
-        artificially making the valve think it's cold.
-        """
-        self.temperature_offset = DEFAULT_TEMP_OFFSET
-        _LOGGER.info("Zone '%s': Temperature offset reset to 0", self.name)
-
     def export_zone_state(self) -> dict:
         """
         Export the complete zone state for Home Assistant to display/log.
         
         This satisfies Requirement #9: export parameters for Home Assistant
         display. Includes current temperature, target, demand metrics, and
-        optional external sensor reading if available.
+        optional external sensor reading if available. Also exports the current
+        temperature offset value being sent to the TRV.
         
         Returns:
             dict: Complete zone state snapshot
@@ -323,7 +315,6 @@ class ZoneWrapper:
             # Zone properties
             "name": self.name,
             "floor_area_m2": round(self.floor_area_m2, 2),
-            "priority": round(self.priority, 2),
             "is_high_priority": self.is_high_priority,
             
             # Heating demand
@@ -331,8 +322,9 @@ class ZoneWrapper:
             "demand_metric": round(self.get_demand_metric(), 3),
             "trv_opening_percent": round(self.trv_opening_percent, 1),
             
-            # Temperature offset feature
+            # Temperature offset feature - exported back to Home Assistant
             "temperature_offset": round(self.temperature_offset, 1),
+            "temp_calib_entity_id": self.temp_calib_entity_id,
             
             # External sensor (if available)
             "has_external_sensor": self.ext_temp_entity_id is not None,
