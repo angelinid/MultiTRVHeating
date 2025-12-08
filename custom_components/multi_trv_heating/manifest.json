@@ -1,0 +1,11 @@
+{
+  "domain": "multi_trv_heating",
+  "name": "Multi-TRV Heating Controller",
+  "codeowners": ["@angelinid"],
+  "config_flow": true,
+  "documentation": "https://github.com/angelinid/MultiTRVHeating",
+  "issue_tracker": "https://github.com/angelinid/MultiTRVHeating/issues",
+  "requirements": [],
+  "version": "1.0.0",
+  "homeassistant": "2024.2.0"
+}
