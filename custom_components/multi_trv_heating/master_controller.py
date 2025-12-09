@@ -80,6 +80,7 @@ class MasterController:
             
             # Create zone wrapper
             self.zones[entity_id] = ZoneWrapper(
+                my_master_controller=self,
                 entity_id=entity_id, 
                 name=zone_name,
                 floor_area_m2=area,
@@ -343,7 +344,7 @@ class MasterController:
         # Just export the current offset value to Home Assistant for visibility
         await self._export_temperature_offsets()
     
-    async def _export_temperature_offsets(self) -> None:
+    async def _export_temperature_offsets(self, zone) -> None:
         """
         Export current TRV temperature offset values to Home Assistant.
         
@@ -354,22 +355,21 @@ class MasterController:
         This method exports those values to the calibration entities
         so they're visible and can be monitored in Home Assistant.
         """
-        for zone in self.zones.values():
-            if not zone.temp_calib_entity_id:
-                continue  # Skip zones without calibration entity
-            
-            _LOGGER.debug(
-                "Zone '%s': Exporting offset %.1f°C to %s",
-                zone.name, zone.temperature_offset, zone.temp_calib_entity_id
-            )
-            
-            # Export current offset to Home Assistant
-            await self.hass.services.async_call(
-                "number",
-                "set_value",
-                {"entity_id": zone.temp_calib_entity_id, "value": zone.temperature_offset},
-                blocking=False,
-            )
+        if not zone.temp_calib_entity_id:
+            return  # Skip zones without calibration entity
+        
+        _LOGGER.debug(
+            "Zone '%s': Exporting offset %.1f°C to %s",
+            zone.name, zone.temperature_offset, zone.temp_calib_entity_id
+        )
+        
+        # Export current offset to Home Assistant
+        await self.hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": zone.temp_calib_entity_id, "value": zone.temperature_offset},
+            blocking=False,
+        )
 
     async def async_set_opentherm_flow_temp(self, flow_temp: float) -> None:
         """

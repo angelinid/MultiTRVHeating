@@ -126,8 +126,8 @@ class TestSuite:
             
             self.log.step(4, "Verify demand metric is calculated correctly")
             demand = zone.get_demand_metric()
-            expected_demand = (2.0 / 10.0) * (25.0 / 100.0)  # 0.05
-            self.log.verify(0.04 < demand < 0.06, f"Demand metric should be ~0.05, got {demand}")
+            expected_demand = 25.0 / 100.0  # 0.25 (just the opening, not error)
+            self.log.verify(0.24 < demand < 0.26, f"Demand metric should be ~0.25, got {demand}")
             self.log.debug(f"Demand metric: {demand}")
             
             self.log.info("Test PASSED: Single zone calculates demand correctly")
@@ -173,9 +173,9 @@ class TestSuite:
             
             self.log.step(3, "Calculate demand metric")
             demand = zone.get_demand_metric()
-            # demand = min(1.0, (8/10) * (100/100)) = 0.8
-            expected_demand = 0.8
-            self.log.verify(0.75 < demand < 0.85, f"Demand should be ~0.8, got {demand}")
+            # demand = opening / 100 = 100/100 = 1.0 (ignoring temperature error)
+            expected_demand = 1.0
+            self.log.verify(0.99 < demand < 1.01, f"Demand should be ~1.0, got {demand}")
             self.log.debug(f"Demand metric: {demand}")
             
             self.log.info("Test PASSED: High demand calculated correctly")

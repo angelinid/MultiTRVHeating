@@ -24,7 +24,10 @@ SOFTWARE.
 
 import time
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from master_controller import MasterController
 
 _LOGGER = logging.getLogger("don_controller")
 
@@ -33,6 +36,7 @@ _LOGGER = logging.getLogger("don_controller")
 MIN_TEMP_OFFSET = -5.0  # Minimum offset in degrees Celsius
 MAX_TEMP_OFFSET = 5.0   # Maximum offset in degrees Celsius
 DEFAULT_TEMP_OFFSET = 0.0  # Default (no offset)
+HEATING_TEMP_OFFSET = -2.0  # Offset applied when heating
 
 # TRV opening thresholds for heat demand triggers
 HIGH_PRIORITY_MIN_OPENING = 25.0  # High priority zones trigger boiler at 25% opening
@@ -63,7 +67,8 @@ class ZoneWrapper:
 
     def __init__(self, entity_id: str, name: str, floor_area_m2: float = 0.0,
                  is_high_priority: bool = True, trv_position_entity_id: Optional[str] = None,
-                 temp_calib_entity_id: Optional[str] = None, ext_temp_entity_id: Optional[str] = None) -> None:
+                 temp_calib_entity_id: Optional[str] = None, ext_temp_entity_id: Optional[str] = None,
+                 my_master_controller: Optional['MasterController'] = None) -> None:
         """
         Initialize a zone wrapper.
         
@@ -75,6 +80,7 @@ class ZoneWrapper:
             trv_position_entity_id: TRV position sensor entity (e.g., "sensor.radiator_1_position")
             temp_calib_entity_id: Temperature calibration number entity (e.g., "number.radiator_1_local_temperature_calibration")
             ext_temp_entity_id: Optional external temperature sensor entity ID
+            my_master_controller: Optional reference to MasterController for offset export
         """
         # ========== Zone Identification ==========
         self.entity_id = entity_id
@@ -112,6 +118,8 @@ class ZoneWrapper:
         # ========== Heating Demand Logic ==========
         # Timestamp of last temperature change (used for stability analysis)
         self.last_update_time = time.time()
+
+        self.master_controller = my_master_controller  # Reference to MasterController
         
         _LOGGER.debug(
             "Zone initialized: %s (entity=%s, area=%.1f m², priority=%s, position_sensor=%s, calib_entity=%s)",
@@ -175,7 +183,7 @@ class ZoneWrapper:
         - Low priority zones can aggregate: Multiple zones at 50% = 100% demand
         
         Also manages temperature offset (Requirement #8):
-        - If valve opens: Set offset to -2.0°C (hardcoded) to encourage more opening
+        - If valve opens: Set offset to HEATING_TEMP_OFFSET (hardcoded) to encourage more opening
         - If valve closes: Reset offset to 0°C
         
         Args:
@@ -187,14 +195,18 @@ class ZoneWrapper:
         # Manage temperature offset based on valve state
         if self.trv_opening_percent > 0.0:
             # Valve is open: Set negative offset to encourage more opening
-            if self.temperature_offset != -2.0:
-                self.temperature_offset = -2.0
-                _LOGGER.debug("Zone '%s': Valve opened, offset set to -2.0°C", self.name)
+            if self.temperature_offset != HEATING_TEMP_OFFSET:
+                self.temperature_offset = HEATING_TEMP_OFFSET
+                _LOGGER.debug("Zone '%s': Valve opened, offset set to %.1f°C", self.name, HEATING_TEMP_OFFSET)
+                if self.master_controller:
+                    self.master_controller._export_temperature_offsets(self)  # Notify controller of offset change
         else:
             # Valve is closed: Reset offset to 0
             if self.temperature_offset != 0.0:
                 self.temperature_offset = 0.0
                 _LOGGER.debug("Zone '%s': Valve closed, offset reset to 0°C", self.name)
+                if self.master_controller:
+                    self.master_controller._export_temperature_offsets(self)  # Notify controller of offset change
         
         # Recalculate demand based on new opening percentage
         self._update_demand_metric()
@@ -256,43 +268,31 @@ class ZoneWrapper:
         Return a normalized demand metric (0.0 to 1.0) for boiler control.
         
         This metric represents how much heat this zone is requesting:
-        - 0.0 = No demand (valve closed or target reached)
-        - 0.5 = 50% demand (moderate heating need)
-        - 1.0 = Maximum demand (valve fully open and cold)
+        - 0.0 = No demand (valve closed OR target already reached)
+        - 0.5 = 50% demand (valve at 50% opening and below target)
+        - 1.0 = Maximum demand (valve fully open and below target)
         
         The boiler intensity (flow temperature) is set to match the HIGHEST
         demand among all zones (Requirement #7).
         
+        Note: Demand is based on valve opening, but returns 0 if already at target.
+        
         Returns:
-            float: Demand metric (0.0 to 1.0) based on temperature error and valve opening
+            float: Demand metric (0.0 to 1.0) based on valve opening percentage
         """
-        # Don't demand heat if target temperature is reached
-        if self.current_error <= 0:
+        # No demand if target is already reached
+        if self.current_error <= 0.0:
             return 0.0
         
-        # Base demand on how far below target we are
-        # For simplicity: demand = (error / 10) * (opening / 100)
-        # This creates a metric that combines temperature gap and valve opening
-        
-        # Normalize temperature error to 0-1 range
-        # Assume max error is 10°C (zone is freezing)
-        normalized_error = min(1.0, self.current_error / 10.0)
-        
-        # Normalize valve opening to 0-1 range
+        # Demand is the normalized valve opening (0-100% → 0.0-1.0)
         normalized_opening = self.trv_opening_percent / 100.0
         
-        # Demand = combination of temperature error and valve opening
-        # This ensures both factors influence boiler intensity
-        demand = normalized_error * normalized_opening
-        
         _LOGGER.debug(
-            "Zone '%s' demand metric: error=%.1f°C (norm=%.2f), "
-            "opening=%.0f%% (norm=%.2f), demand=%.2f",
-            self.name, self.current_error, normalized_error,
-            self.trv_opening_percent, normalized_opening, demand
+            "Zone '%s' demand metric: opening=%.0f%% → demand=%.3f",
+            self.name, self.trv_opening_percent, normalized_opening
         )
         
-        return max(0.0, min(1.0, demand))
+        return max(0.0, min(1.0, normalized_opening))
 
     def export_zone_state(self) -> dict:
         """
