@@ -24,7 +24,14 @@ SOFTWARE.
 
 import logging
 import time
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
+
+try:
+    from homeassistant.helpers.event import async_track_state_change_event
+except ImportError:
+    # For testing without Home Assistant installed
+    async_track_state_change_event = None
 
 try:
     from .zone_wrapper import ZoneWrapper
@@ -53,6 +60,17 @@ MAX_FLOW_TEMP = 80.0
 MIN_TEMP_OFFSET = -5.0  # Minimum offset in degrees Celsius
 MAX_TEMP_OFFSET = 5.0   # Maximum offset in degrees Celsius
 
+# =========================================================
+# Pre-heating Control Constants
+# =========================================================
+
+# Pre-heating tuning constant: scales thermal load to flow temperature override
+# thermal_load = max(temp_error * floor_area) for all high-priority zones
+# time_pressure = 1.0 / time_remaining_seconds
+# flow_override = MIN_FLOW_TEMP + (thermal_load * time_pressure * PREHEATING_TUNING_CONSTANT)
+# Tune this based on system response (larger = more aggressive preheating)
+PREHEATING_TUNING_CONSTANT = 1.0  # Can be tuned empirically
+
 
 class MasterController:
 
@@ -65,6 +83,12 @@ class MasterController:
         """
         self.hass = hass
         self.zones: dict[str, ZoneWrapper] = {}
+        
+        # ========== Pre-heating Configuration ==========
+        # Set by config_flow - entity ID of datetime/number entity that stores preheating end time
+        self.preheating_end_time_entity_id: Optional[str] = None
+        # Current pre-heating end time (None = not preheating)
+        self.preheating_end_time: Optional[datetime] = None
         
         _LOGGER.info("MasterController initializing with %d zones", len(zone_configs))
         
@@ -117,7 +141,12 @@ class MasterController:
         1. Climate entities - for temperature changes
         2. TRV position sensors - for valve opening changes
         3. External temperature sensors - for better temperature readings
+        4. Pre-heating end time entity - for pre-heating activation
         """
+        if async_track_state_change_event is None:
+            _LOGGER.warning("async_track_state_change_event not available - running in test mode")
+            return
+        
         _LOGGER.info(
             "MasterController starting listeners: %d climate entities, %d position sensors, %d external sensors",
             len(self.monitored_climate_entities), len(self.monitored_position_sensors),
@@ -126,24 +155,36 @@ class MasterController:
         
         # Listen for climate entity state changes (temperature, target, etc.)
         if self.monitored_climate_entities:
-            self.hass.helpers.event.async_track_state_change_event(
+            async_track_state_change_event(
+                self.hass,
                 self.monitored_climate_entities,
                 self._async_climate_state_change
             )
         
         # Listen for TRV position sensor changes (valve opening %)
         if self.monitored_position_sensors:
-            self.hass.helpers.event.async_track_state_change_event(
+            async_track_state_change_event(
+                self.hass,
                 self.monitored_position_sensors,
                 self._async_position_change
             )
         
         # Listen for external temperature sensor changes
         if self.monitored_external_sensors:
-            self.hass.helpers.event.async_track_state_change_event(
+            async_track_state_change_event(
+                self.hass,
                 self.monitored_external_sensors,
                 self._async_external_temp_change
             )
+        
+        # Listen for pre-heating end time changes (if configured)
+        if self.preheating_end_time_entity_id:
+            async_track_state_change_event(
+                self.hass,
+                [self.preheating_end_time_entity_id],
+                self._async_preheating_end_time_change
+            )
+            _LOGGER.info("Pre-heating listener enabled on entity %s", self.preheating_end_time_entity_id)
         
     async def _async_climate_state_change(self, event) -> None:
         """
@@ -234,6 +275,142 @@ class MasterController:
                     )
                 break
 
+    def _is_preheating(self) -> bool:
+        """
+        Check if pre-heating mode is currently active.
+        
+        Returns:
+            bool: True if preheating_end_time is set and in the future
+        """
+        if self.preheating_end_time is None:
+            return False
+        
+        # Check if end time is in the future
+        now = datetime.now()
+        is_active = self.preheating_end_time > now
+        
+        if is_active:
+            remaining_seconds = (self.preheating_end_time - now).total_seconds()
+            _LOGGER.debug("Pre-heating is ACTIVE: %.0f seconds remaining", remaining_seconds)
+        
+        return is_active
+    
+    def _get_max_high_priority_thermal_load(self) -> float:
+        """
+        Calculate the maximum thermal load among high-priority zones.
+        
+        Thermal load = temperature_error * floor_area
+        Returns the maximum value across all high-priority zones.
+        Only considers zones that need heating (error > 0).
+        
+        Returns:
+            float: Maximum thermal load (°C·m²), or 0 if no high-priority zones need heat
+        """
+        max_load = 0.0
+        
+        for zone in self.zones.values():
+            if zone.is_high_priority and zone.current_error > 0:
+                thermal_load = zone.current_error * zone.floor_area_m2
+                max_load = max(max_load, thermal_load)
+                _LOGGER.debug(
+                    "High-priority zone '%s': error=%.1f°C, area=%.1f m², load=%.1f",
+                    zone.name, zone.current_error, zone.floor_area_m2, thermal_load
+                )
+        
+        _LOGGER.debug("Max high-priority thermal load: %.1f °C·m²", max_load)
+        return max_load
+    
+    def _calculate_preheating_flow_temp(self) -> float:
+        """
+        Calculate flow temperature override during pre-heating mode.
+        
+        Pre-heating formula:
+        1. Get max thermal load from high-priority zones: thermal_load = max(error * area)
+        2. Calculate time pressure: time_pressure = 1.0 / time_remaining_seconds
+        3. Calculate override: flow_temp = MIN_FLOW_TEMP + (thermal_load * time_pressure * TUNING_CONSTANT)
+        4. Clamp to valid range [MIN_FLOW_TEMP, MAX_FLOW_TEMP]
+        
+        The override is aggressive: smaller time windows and larger thermal loads
+        result in higher flow temperatures. As time runs out, flow_temp increases
+        non-linearly (approaching MAX_FLOW_TEMP when time_remaining → 0).
+        
+        Returns:
+            float: Calculated flow temperature override for pre-heating (°C)
+        """
+        if not self._is_preheating():
+            return 0.0  # Not preheating
+        
+        now = datetime.now()
+        time_remaining_seconds = (self.preheating_end_time - now).total_seconds()
+        
+        # Failsafe: if time is already past, return 0 to fall back to normal logic
+        if time_remaining_seconds <= 0:
+            _LOGGER.warning("Pre-heating time has expired, falling back to normal control")
+            self.preheating_end_time = None  # Deactivate pre-heating
+            return 0.0
+        
+        # Get max thermal load from high-priority zones
+        max_thermal_load = self._get_max_high_priority_thermal_load()
+        
+        # Calculate time pressure (increases as time runs out)
+        time_pressure = 1.0 / time_remaining_seconds
+        
+        # Calculate override using parametric formula
+        # flow_override = thermal_load * time_pressure * TUNING_CONSTANT
+        flow_override = max_thermal_load * time_pressure * PREHEATING_TUNING_CONSTANT
+        
+        # Calculate final flow temperature
+        preheating_flow_temp = MIN_FLOW_TEMP + flow_override
+        
+        _LOGGER.debug(
+            "Pre-heating calculation: thermal_load=%.1f, time_remaining=%.0f s, "
+            "time_pressure=%.6f, override=%.1f°C, final_flow_temp=%.1f°C",
+            max_thermal_load, time_remaining_seconds, time_pressure,
+            flow_override, preheating_flow_temp
+        )
+        
+        # Clamp to valid range
+        return max(MIN_FLOW_TEMP, min(MAX_FLOW_TEMP, preheating_flow_temp))
+
+    async def _async_preheating_end_time_change(self, event) -> None:
+        """
+        Event handler: Called when pre-heating end time entity changes.
+        
+        Updates the preheating_end_time. If set to None/empty, deactivates pre-heating.
+        
+        Args:
+            event: Home Assistant state change event
+        """
+        entity_id = event.data.get('entity_id')
+        new_state = event.data.get('new_state')
+        
+        _LOGGER.debug("Pre-heating end time change for entity_id=%s", entity_id)
+        
+        if new_state and new_state.state:
+            try:
+                # Parse the datetime string from Home Assistant
+                # Home Assistant datetime format is typically ISO 8601: "2025-12-09T14:30:00"
+                time_str = new_state.state
+                if time_str.lower() in ['none', 'unknown', '']:
+                    self.preheating_end_time = None
+                    _LOGGER.info("Pre-heating deactivated (end time cleared)")
+                else:
+                    # Try to parse ISO format
+                    self.preheating_end_time = datetime.fromisoformat(time_str)
+                    remaining = (self.preheating_end_time - datetime.now()).total_seconds()
+                    _LOGGER.info(
+                        "Pre-heating activated: end time=%s, %.0f seconds from now",
+                        self.preheating_end_time, remaining
+                    )
+                    # Trigger boiler recalculation immediately
+                    await self._calculate_and_command()
+            except (ValueError, TypeError) as e:
+                _LOGGER.error("Error parsing pre-heating end time '%s': %s", new_state.state, e)
+        else:
+            # State is None or empty, deactivate pre-heating
+            self.preheating_end_time = None
+            _LOGGER.info("Pre-heating deactivated (state cleared)")
+
     async def _calculate_and_command(self) -> None:
         """
         Main heating control logic. Called whenever any zone state changes.
@@ -323,7 +500,15 @@ class MasterController:
         # Demand metric: 0.0 = off, 1.0 = max
         # Flow temperature: MIN_FLOW_TEMP (5°C) = off, MAX_FLOW_TEMP (80°C) = max
         
-        if boiler_should_be_on and boiler_demand > 0:
+        # Check if pre-heating is active - if yes, use pre-heating override instead
+        if self._is_preheating():
+            flow_temp = self._calculate_preheating_flow_temp()
+            _LOGGER.info(
+                "Pre-heating active: Using override flow_temp=%.1f°C (instead of normal demand-based %.1f°C)",
+                flow_temp,
+                MIN_FLOW_TEMP + (boiler_demand * (MAX_FLOW_TEMP - MIN_FLOW_TEMP)) if boiler_should_be_on and boiler_demand > 0 else MIN_FLOW_TEMP
+            )
+        elif boiler_should_be_on and boiler_demand > 0:
             # Convert demand metric to flow temperature
             # Linear interpolation: demand=0.0 -> MIN_FLOW_TEMP, demand=1.0 -> MAX_FLOW_TEMP
             flow_temp = MIN_FLOW_TEMP + (boiler_demand * (MAX_FLOW_TEMP - MIN_FLOW_TEMP))
@@ -338,11 +523,6 @@ class MasterController:
         
         # ========== Send command to boiler ==========
         await self.async_set_opentherm_flow_temp(flow_temp)
-        
-        # ========== Export TRV temperature offsets (Requirement #8) ==========
-        # Temperature offsets are now set in zone_wrapper when valve opens/closes
-        # Just export the current offset value to Home Assistant for visibility
-        await self._export_temperature_offsets()
     
     async def _export_temperature_offsets(self, zone) -> None:
         """
