@@ -90,6 +90,10 @@ class MasterController:
         # Current pre-heating end time (None = not preheating)
         self.preheating_end_time: Optional[datetime] = None
         
+        # ========== OpenTherm Configuration ==========
+        # Current OpenTherm flow temperature request (for sensor reporting)
+        self.current_flow_temp: float = MIN_FLOW_TEMP
+        
         _LOGGER.info("MasterController initializing with %d zones", len(zone_configs))
         
         # Instantiate ZoneWrapper for each configured zone
@@ -155,6 +159,7 @@ class MasterController:
         
         # Listen for climate entity state changes (temperature, target, etc.)
         if self.monitored_climate_entities:
+            _LOGGER.debug("Setting up listener for climate entities: %s", self.monitored_climate_entities)
             async_track_state_change_event(
                 self.hass,
                 self.monitored_climate_entities,
@@ -163,6 +168,7 @@ class MasterController:
         
         # Listen for TRV position sensor changes (valve opening %)
         if self.monitored_position_sensors:
+            _LOGGER.debug("Setting up listener for position sensors: %s", self.monitored_position_sensors)
             async_track_state_change_event(
                 self.hass,
                 self.monitored_position_sensors,
@@ -171,6 +177,7 @@ class MasterController:
         
         # Listen for external temperature sensor changes
         if self.monitored_external_sensors:
+            _LOGGER.debug("Setting up listener for external sensors: %s", self.monitored_external_sensors)
             async_track_state_change_event(
                 self.hass,
                 self.monitored_external_sensors,
@@ -179,12 +186,15 @@ class MasterController:
         
         # Listen for pre-heating end time changes (if configured)
         if self.preheating_end_time_entity_id:
+            _LOGGER.debug("Setting up listener for pre-heating end time: %s", self.preheating_end_time_entity_id)
             async_track_state_change_event(
                 self.hass,
                 [self.preheating_end_time_entity_id],
                 self._async_preheating_end_time_change
             )
             _LOGGER.info("Pre-heating listener enabled on entity %s", self.preheating_end_time_entity_id)
+        
+        _LOGGER.info("All listeners set up successfully")
         
     async def _async_climate_state_change(self, event) -> None:
         """
@@ -219,23 +229,31 @@ class MasterController:
         entity_id = event.data.get('entity_id')
         new_state = event.data.get('new_state')
         
-        _LOGGER.debug("TRV position change for entity_id=%s", entity_id)
+        _LOGGER.debug("TRV position change for entity_id=%s, state=%s", entity_id, new_state.state if new_state else None)
         
         # Find which zone this position sensor belongs to
         for zone in self.zones.values():
             if zone.trv_position_entity_id == entity_id and new_state:
+                # Skip unknown/unavailable states - sensor hasn't been initialized yet
+                if new_state.state in ['unknown', 'unavailable', None, '']:
+                    _LOGGER.debug(
+                        "TRV position for zone '%s' is %s, skipping update",
+                        zone.name, new_state.state or 'None'
+                    )
+                    break
+                
                 try:
                     # Extract opening percentage from sensor state
                     opening_percent = float(new_state.state)
                     zone.update_trv_opening(opening_percent)
                     _LOGGER.debug(
-                        "Zone '%s': TRV position updated to %.0f%%",
-                        zone.name, opening_percent
+                        "Zone '%s': TRV position updated to %.0f%% (from %s)",
+                        zone.name, opening_percent, entity_id
                     )
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning(
-                        "Error reading TRV position from %s: %s",
-                        entity_id, e
+                        "Error reading TRV position from %s (state='%s'): %s",
+                        entity_id, new_state.state, e
                     )
                 break
         
@@ -255,23 +273,31 @@ class MasterController:
         entity_id = event.data.get('entity_id')
         new_state = event.data.get('new_state')
         
-        _LOGGER.debug("External temp sensor change for entity_id=%s", entity_id)
+        _LOGGER.debug("External temp sensor change for entity_id=%s, state=%s", entity_id, new_state.state if new_state else None)
         
         # Find which zone this external sensor belongs to
         for zone in self.zones.values():
             if zone.ext_temp_entity_id == entity_id and new_state:
+                # Skip unknown/unavailable states - sensor hasn't been initialized yet
+                if new_state.state in ['unknown', 'unavailable', None, '']:
+                    _LOGGER.debug(
+                        "External temp for zone '%s' is %s, skipping update",
+                        zone.name, new_state.state or 'None'
+                    )
+                    break
+                
                 try:
                     # Extract temperature from sensor state
                     ext_temp = float(new_state.state)
                     zone.update_external_temperature(ext_temp)
-                    _LOGGER.debug(
-                        "Zone '%s': External temp updated to %.1f°C",
-                        zone.name, ext_temp
+                    _LOGGER.info(
+                        "Zone '%s': External temp updated to %.1f°C (from %s)",
+                        zone.name, ext_temp, entity_id
                     )
                 except (ValueError, TypeError) as e:
                     _LOGGER.warning(
-                        "Error reading external temp from %s: %s",
-                        entity_id, e
+                        "Error reading external temp from %s (state='%s'): %s",
+                        entity_id, new_state.state, e
                     )
                 break
 
@@ -524,33 +550,6 @@ class MasterController:
         # ========== Send command to boiler ==========
         await self.async_set_opentherm_flow_temp(flow_temp)
     
-    async def _export_temperature_offsets(self, zone) -> None:
-        """
-        Export current TRV temperature offset values to Home Assistant.
-        
-        The offset is calculated in zone_wrapper based on valve state:
-        - Valve open: offset = -2.0°C
-        - Valve closed: offset = 0°C
-        
-        This method exports those values to the calibration entities
-        so they're visible and can be monitored in Home Assistant.
-        """
-        if not zone.temp_calib_entity_id:
-            return  # Skip zones without calibration entity
-        
-        _LOGGER.debug(
-            "Zone '%s': Exporting offset %.1f°C to %s",
-            zone.name, zone.temperature_offset, zone.temp_calib_entity_id
-        )
-        
-        # Export current offset to Home Assistant
-        await self.hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": zone.temp_calib_entity_id, "value": zone.temperature_offset},
-            blocking=False,
-        )
-
     async def async_set_opentherm_flow_temp(self, flow_temp: float) -> None:
         """
         Command the boiler's flow temperature via OpenTherm integration.
@@ -564,6 +563,9 @@ class MasterController:
         
         # Clamp to safe physical limits
         final_temp = max(MIN_FLOW_TEMP, min(MAX_FLOW_TEMP, flow_temp))
+        
+        # Track the current flow temperature for sensor reporting
+        self.current_flow_temp = final_temp
         
         _LOGGER.debug(
             "Setting OpenTherm flow temperature: requested=%.1f°C, final=%.1f°C",
@@ -589,7 +591,8 @@ class MasterController:
         
         return {
             "zones": zones_state,
-            "zone_count": len(self.zones)
+            "zone_count": len(self.zones),
+            "current_flow_temp": self.current_flow_temp,
         }
     
     def get_zone_state(self, entity_id: str) -> Optional[dict]:

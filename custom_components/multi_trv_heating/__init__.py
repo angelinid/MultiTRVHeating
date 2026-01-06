@@ -42,11 +42,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # 3. Start listening to events
     await controller.async_start_listening()
+    
+    # 4. Set up sensor platform to expose controller and zone state
+    # Home Assistant will automatically discover and call async_setup_entry in sensor.py
+    await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
 
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Handle removal of a config entry."""
-    # This is required to clean up event listeners when the component is removed via the UI.
-    # The listeners would need to be stored in the controller instance for cleanup.
-    return True
+    # Unload sensor platform
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor"])
+    
+    # Clean up controller and listeners
+    if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
+        del hass.data[DOMAIN][entry.entry_id]
+    
+    return unload_ok

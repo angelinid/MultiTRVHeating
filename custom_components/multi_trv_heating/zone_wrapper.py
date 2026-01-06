@@ -198,15 +198,11 @@ class ZoneWrapper:
             if self.temperature_offset != HEATING_TEMP_OFFSET:
                 self.temperature_offset = HEATING_TEMP_OFFSET
                 _LOGGER.debug("Zone '%s': Valve opened, offset set to %.1f°C", self.name, HEATING_TEMP_OFFSET)
-                if self.master_controller:
-                    self.master_controller._export_temperature_offsets(self)  # Notify controller of offset change
         else:
             # Valve is closed: Reset offset to 0
             if self.temperature_offset != 0.0:
                 self.temperature_offset = 0.0
                 _LOGGER.debug("Zone '%s': Valve closed, offset reset to 0°C", self.name)
-                if self.master_controller:
-                    self.master_controller._export_temperature_offsets(self)  # Notify controller of offset change
         
         # Recalculate demand based on new opening percentage
         self._update_demand_metric()
