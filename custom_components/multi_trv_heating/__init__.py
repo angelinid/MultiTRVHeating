@@ -43,16 +43,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # 3. Start listening to events
     await controller.async_start_listening()
     
-    # 4. Set up sensor platform to expose controller and zone state
-    # Home Assistant will automatically discover and call async_setup_entry in sensor.py
-    await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
+    # 4. Set up sensor, switch, and number platforms to expose controller and zone state
+    # Home Assistant will automatically discover and call async_setup_entry in sensor.py, switch.py, number.py
+    # Entities will create their own DeviceInfo and group automatically by matching identifiers
+    await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "switch", "number"])
 
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Handle removal of a config entry."""
-    # Unload sensor platform
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor"])
+    # Unload sensor, switch, and number platforms
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor", "switch", "number"])
     
     # Clean up controller and listeners
     if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:

@@ -16,9 +16,8 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'custom_components', 'multi_trv_heating'))
 
 from zone_wrapper import ZoneWrapper
-from master_controller import (
-    MasterController, MIN_FLOW_TEMP, MAX_FLOW_TEMP, PREHEATING_TUNING_CONSTANT
-)
+from master_controller import MasterController, MIN_FLOW_TEMP, MAX_FLOW_TEMP
+from preheating import PreheatingController, PREHEATING_TUNING_CONSTANT
 
 
 class MockHomeAssistant:
@@ -105,10 +104,10 @@ class TestPreheating:
         print("\nTest 1: Pre-heating not active by default")
         self.setup_controller()
         
-        is_active = self.controller._is_preheating()
-        self.verify(not is_active, "Pre-heating should be inactive initially")
+        is_active = self.controller.preheating.is_active()
+        self.verify(not is_active, "Pre-heating should not be active by default")
         
-        end_time = self.controller.preheating_end_time
+        end_time = self.controller.preheating.preheating_end_time
         self.verify(end_time is None, "End time should be None initially")
     
     def test_2_preheating_activation(self):
@@ -118,9 +117,9 @@ class TestPreheating:
         
         # Set end time 30 minutes in future
         future_time = datetime.now() + timedelta(minutes=30)
-        self.controller.preheating_end_time = future_time
+        self.controller.preheating.preheating_end_time = future_time
         
-        is_active = self.controller._is_preheating()
+        is_active = self.controller.preheating.is_active()
         self.verify(is_active, "Pre-heating should be active when end time is in future")
         
         remaining = (future_time - datetime.now()).total_seconds()
@@ -133,9 +132,9 @@ class TestPreheating:
         
         # Set end time 5 minutes in past
         past_time = datetime.now() - timedelta(minutes=5)
-        self.controller.preheating_end_time = past_time
+        self.controller.preheating.preheating_end_time = past_time
         
-        is_active = self.controller._is_preheating()
+        is_active = self.controller.preheating.is_active()
         self.verify(not is_active, "Pre-heating should be inactive when end time is past")
     
     def test_4_max_thermal_load_single_zone(self):
@@ -155,7 +154,7 @@ class TestPreheating:
         bedroom.current_temp = 20.0
         bedroom.current_error = 0.0
         
-        max_load = self.controller._get_max_high_priority_thermal_load()
+        max_load = self.controller.preheating._get_max_high_priority_thermal_load()
         expected_load = 4.0 * 40.0  # error * area = 160
         
         self.verify(
@@ -180,7 +179,7 @@ class TestPreheating:
         bedroom.current_temp = 16.0
         bedroom.current_error = 4.0
         
-        max_load = self.controller._get_max_high_priority_thermal_load()
+        max_load = self.controller.preheating._get_max_high_priority_thermal_load()
         expected_max = 100.0  # bedroom's load
         
         self.verify(
@@ -206,7 +205,7 @@ class TestPreheating:
             zone.current_temp = 22.0
             zone.current_error = 0.0
         
-        max_load = self.controller._get_max_high_priority_thermal_load()
+        max_load = self.controller.preheating._get_max_high_priority_thermal_load()
         self.verify(max_load == 0.0, "Low-priority zones should not contribute to thermal load")
     
     def test_7_preheating_flow_temp_calculation_30min(self):
@@ -222,9 +221,9 @@ class TestPreheating:
         
         # Activate pre-heating: 30 minutes from now
         end_time = datetime.now() + timedelta(minutes=30)
-        self.controller.preheating_end_time = end_time
+        self.controller.preheating.preheating_end_time = end_time
         
-        flow_temp = self.controller._calculate_preheating_flow_temp()
+        flow_temp = self.controller.preheating.calculate_flow_temp_override()
         
         # thermal_load = 2.0 * 40.0 = 80
         # time_pressure = 1.0 / 1800 = 0.000556
@@ -253,13 +252,13 @@ class TestPreheating:
         
         # Flow temp with 30 minutes remaining
         end_time_30min = datetime.now() + timedelta(minutes=30)
-        self.controller.preheating_end_time = end_time_30min
-        flow_temp_30min = self.controller._calculate_preheating_flow_temp()
+        self.controller.preheating.preheating_end_time = end_time_30min
+        flow_temp_30min = self.controller.preheating.calculate_flow_temp_override()
         
         # Flow temp with 5 minutes remaining (6x time pressure)
         end_time_5min = datetime.now() + timedelta(minutes=5)
-        self.controller.preheating_end_time = end_time_5min
-        flow_temp_5min = self.controller._calculate_preheating_flow_temp()
+        self.controller.preheating.preheating_end_time = end_time_5min
+        flow_temp_5min = self.controller.preheating.calculate_flow_temp_override()
         
         self.verify(
             flow_temp_5min > flow_temp_30min,
@@ -280,9 +279,9 @@ class TestPreheating:
         
         # End time in 1 second
         end_time = datetime.now() + timedelta(seconds=1)
-        self.controller.preheating_end_time = end_time
+        self.controller.preheating.preheating_end_time = end_time
         
-        flow_temp = self.controller._calculate_preheating_flow_temp()
+        flow_temp = self.controller.preheating.calculate_flow_temp_override()
         
         self.verify(
             flow_temp <= MAX_FLOW_TEMP,
@@ -313,9 +312,9 @@ class TestPreheating:
         
         # 30 minutes remaining
         end_time = datetime.now() + timedelta(minutes=30)
-        self.controller.preheating_end_time = end_time
+        self.controller.preheating.preheating_end_time = end_time
         
-        flow_temp = self.controller._calculate_preheating_flow_temp()
+        flow_temp = self.controller.preheating.calculate_flow_temp_override()
         
         # Should use living room's load (0.5 * 40 = 20), not guest's (9 * 100 = 900)
         expected_override = 20 * (1.0 / 1800.0) * PREHEATING_TUNING_CONSTANT

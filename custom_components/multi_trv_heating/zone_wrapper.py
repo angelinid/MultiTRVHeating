@@ -133,7 +133,7 @@ class ZoneWrapper:
         
         Extracts:
         - current_temperature: Current room temperature
-        - target_temperature: Target temperature setting
+        - temperature: Target temperature setting
         - hvac_action: Current HVAC action (affects demand calculation)
         
         Args:
@@ -146,7 +146,14 @@ class ZoneWrapper:
         try:
             # Extract temperature readings from climate entity attributes
             current = new_state.attributes.get("current_temperature")
-            target = new_state.attributes.get("target_temperature")
+            
+            # Try multiple attribute names for target temperature
+            target = new_state.attributes.get("temperature")
+            if target is None:
+                target = new_state.attributes.get("target_temp")
+            if target is None:
+                # Fallback: try to use the state value itself
+                target = new_state.state
             
             if current is not None:
                 self.current_temp = float(current)
@@ -283,11 +290,6 @@ class ZoneWrapper:
         # Demand is the normalized valve opening (0-100% → 0.0-1.0)
         normalized_opening = self.trv_opening_percent / 100.0
         
-        _LOGGER.debug(
-            "Zone '%s' demand metric: opening=%.0f%% → demand=%.3f",
-            self.name, self.trv_opening_percent, normalized_opening
-        )
-        
         return max(0.0, min(1.0, normalized_opening))
 
     def export_zone_state(self) -> dict:
@@ -315,7 +317,6 @@ class ZoneWrapper:
             
             # Heating demand
             "is_demanding_heat": self.is_demanding_heat,
-            "demand_metric": round(self.get_demand_metric(), 3),
             "trv_opening_percent": round(self.trv_opening_percent, 1),
             
             # Temperature offset feature - exported back to Home Assistant

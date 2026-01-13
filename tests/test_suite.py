@@ -112,7 +112,7 @@ class TestSuite:
                 state="heating",
                 attributes={
                     'current_temperature': 18.0,
-                    'target_temperature': 20.0,
+                    'target_temp': 20.0,
                 }
             )
             zone.update_from_state(state)
@@ -164,7 +164,7 @@ class TestSuite:
                 state="heating",
                 attributes={
                     'current_temperature': 12.0,
-                    'target_temperature': 20.0,
+                    'target_temp': 20.0,
                 }
             )
             zone.update_from_state(state)
@@ -295,7 +295,7 @@ class TestSuite:
             self.log.step(2, "Set zone1: 3°C below target, 30% opening")
             state1 = MockState("climate.room1", "heating", {
                 'current_temperature': 17.0,
-                'target_temperature': 20.0,
+                'target_temp': 20.0,
             })
             zone1.update_from_state(state1)
             zone1.update_trv_opening(30.0)
@@ -305,7 +305,7 @@ class TestSuite:
             self.log.step(3, "Set zone2: 6°C below target, 50% opening")
             state2 = MockState("climate.room2", "heating", {
                 'current_temperature': 14.0,
-                'target_temperature': 20.0,
+                'target_temp': 20.0,
             })
             zone2.update_from_state(state2)
             zone2.update_trv_opening(50.0)
@@ -592,7 +592,7 @@ class TestSuite:
             zone = ZoneWrapper("climate.room", "Test Room", is_high_priority=True)
             state = MockState("climate.room", "heating", {
                 'current_temperature': 21.0,
-                'target_temperature': 21.0,
+                'target_temp': 21.0,
             })
             zone.update_from_state(state)
             self.log.verify(zone.current_error == 0.0, "Temperature error should be 0")
@@ -682,7 +682,7 @@ class TestSuite:
             for i, temp in enumerate(temps):
                 state = MockState("climate.room", "heating", {
                     'current_temperature': temp,
-                    'target_temperature': 20.0,
+                    'target_temp': 20.0,
                 })
                 zone.update_from_state(state)
                 demand = zone.get_demand_metric()
@@ -736,7 +736,7 @@ class TestSuite:
             self.log.step(2, "Set Living Room: 22°C target, 20°C current, 40% valve")
             state = MockState("climate.living", "heating", {
                 'current_temperature': 20.0,
-                'target_temperature': 22.0,
+                'target_temp': 22.0,
             })
             living.update_from_state(state)
             living.update_trv_opening(40.0)
@@ -745,7 +745,7 @@ class TestSuite:
             self.log.step(3, "Set Bedroom: 20°C target, 18°C current, 60% valve")
             state = MockState("climate.bedroom", "heating", {
                 'current_temperature': 18.0,
-                'target_temperature': 20.0,
+                'target_temp': 20.0,
             })
             bedroom.update_from_state(state)
             bedroom.update_trv_opening(60.0)
@@ -754,7 +754,7 @@ class TestSuite:
             self.log.step(4, "Set Guest: 19°C target, 18°C current, 50% valve")
             state = MockState("climate.guest", "heating", {
                 'current_temperature': 18.0,
-                'target_temperature': 19.0,
+                'target_temp': 19.0,
             })
             guest.update_from_state(state)
             guest.update_trv_opening(50.0)
@@ -763,7 +763,7 @@ class TestSuite:
             self.log.step(5, "Set Hallway: 18°C target, 18°C current, 0% valve")
             state = MockState("climate.hallway", "heating", {
                 'current_temperature': 18.0,
-                'target_temperature': 18.0,
+                'target_temp': 18.0,
             })
             hallway.update_from_state(state)
             hallway.update_trv_opening(0.0)
@@ -827,7 +827,7 @@ class TestSuite:
             self.log.step(2, "Set Zone A: demanding heat (2°C below, 50% open)")
             state_a = MockState("climate.living", "heating", {
                 'current_temperature': 19.0,
-                'target_temperature': 21.0,
+                'target_temp': 22.0,
             })
             zone_a.update_from_state(state_a)
             zone_a.update_trv_opening(50.0)
@@ -839,7 +839,7 @@ class TestSuite:
             # Initial: Zone B closed and 1°C below target
             state_b = MockState("climate.dining", "idle", {
                 'current_temperature': 19.0,
-                'target_temperature': 20.0,
+                'target_temp': 20.0,
             })
             zone_b.update_from_state(state_b)
             zone_b.update_trv_opening(0.0)
@@ -851,7 +851,7 @@ class TestSuite:
             # Zone B temp rises due to thermal influence
             state_b = MockState("climate.dining", "idle", {
                 'current_temperature': 20.0,  # Reached target
-                'target_temperature': 20.0,
+                'target_temp': 20.0,
             })
             zone_b.update_from_state(state_b)
             zone_b.update_trv_opening(0.0)  # Still closed

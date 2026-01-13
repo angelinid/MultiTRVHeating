@@ -15,13 +15,17 @@ try:
     from homeassistant.core import HomeAssistant, callback
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
     from homeassistant.helpers.typing import ConfigType
+    from homeassistant.helpers.device_registry import DeviceInfo
     # Convert enum to string value
-    _UNIT_TEMP = UnitOfTemperature.CELSIUS
-    _UNIT_PERCENT = PERCENTAGE
+    _UNIT_TEMP = UnitOfTemperature.CELSIUS if hasattr(UnitOfTemperature, 'CELSIUS') else "°C"
+    if hasattr(_UNIT_TEMP, 'value'):
+        _UNIT_TEMP = _UNIT_TEMP.value
+    _UNIT_PERCENT = PERCENTAGE if isinstance(PERCENTAGE, str) else str(PERCENTAGE)
 except ImportError:
     # For testing without Home Assistant
     SensorEntity = object
     SensorStateClass = None
+    DeviceInfo = None
     _UNIT_TEMP = "°C"
     _UNIT_PERCENT = "%"
     HomeAssistant = None
@@ -41,7 +45,8 @@ class MultiTRVHeatingSensor(SensorEntity if SensorEntity != object else object):
     """
     
     def __init__(self, name: str, unique_id: str, unit_of_measurement: Optional[str] = None,
-                 state_class: Optional[str] = None, icon: Optional[str] = None) -> None:
+                 state_class: Optional[str] = None, icon: Optional[str] = None,
+                 device_info: Optional[Any] = None) -> None:
         """
         Initialize a MultiTRVHeating sensor.
         
@@ -51,6 +56,7 @@ class MultiTRVHeatingSensor(SensorEntity if SensorEntity != object else object):
             unit_of_measurement: Unit for sensor values (e.g., "°C", "%")
             state_class: HA state class for the sensor (e.g., "measurement", "total")
             icon: Icon name (e.g., "mdi:thermometer")
+            device_info: Device info dict for grouping entities into a device
         """
         self._attr_name = name
         self._attr_unique_id = unique_id
@@ -58,6 +64,7 @@ class MultiTRVHeatingSensor(SensorEntity if SensorEntity != object else object):
         self._attr_state_class = state_class
         self._attr_icon = icon
         self._attr_native_value = None
+        self._attr_device_info = device_info
     
     @property
     def state(self) -> Any:
@@ -72,7 +79,8 @@ class ControllerSensor(MultiTRVHeatingSensor):
     
     def __init__(self, name: str, unique_id: str, metric_key: str,
                  unit: Optional[str] = None, state_class: Optional[str] = None,
-                 icon: Optional[str] = None, entry_id: Optional[str] = None) -> None:
+                 icon: Optional[str] = None, entry_id: Optional[str] = None,
+                 device_info: Optional[Any] = None) -> None:
         """
         Initialize a controller sensor.
         
@@ -84,14 +92,15 @@ class ControllerSensor(MultiTRVHeatingSensor):
             state_class: State class for HA
             icon: Icon name
             entry_id: Config entry ID for prefixing unique IDs
+            device_info: Device info dict for grouping entities
         """
-        # Prefix unique_id with entry_id for better organization
+        # Prefix unique_id with entry_id and multi_trv for better organization
         if entry_id:
-            prefixed_id = f"{entry_id}_{unique_id}"
+            prefixed_id = f"{entry_id}_multi_trv_{unique_id}"
         else:
-            prefixed_id = unique_id
+            prefixed_id = f"multi_trv_{unique_id}"
         
-        super().__init__(name, prefixed_id, unit, state_class, icon)
+        super().__init__(name, prefixed_id, unit, state_class, icon, device_info)
         self.metric_key = metric_key
         self.controller = None  # Will be set when attached to controller
     
@@ -114,7 +123,8 @@ class ZoneSensor(MultiTRVHeatingSensor):
     
     def __init__(self, zone_name: str, metric_name: str, metric_key: str,
                  unit: Optional[str] = None, state_class: Optional[str] = None,
-                 icon: Optional[str] = None, entry_id: Optional[str] = None) -> None:
+                 icon: Optional[str] = None, entry_id: Optional[str] = None,
+                 device_info: Optional[Any] = None) -> None:
         """
         Initialize a zone sensor.
         
@@ -126,10 +136,11 @@ class ZoneSensor(MultiTRVHeatingSensor):
             state_class: State class for HA
             icon: Icon name
             entry_id: Config entry ID for prefixing unique IDs
+            device_info: Device info dict for grouping entities
         """
         name = f"{zone_name} {metric_name}"
         zone_name_lower = zone_name.lower().replace(" ", "_")
-        unique_id = f"{zone_name_lower}_{metric_key}"
+        unique_id = f"multi_trv_{zone_name_lower}_{metric_key}"
         
         # Prefix unique_id with entry_id for better organization
         if entry_id:
@@ -137,7 +148,7 @@ class ZoneSensor(MultiTRVHeatingSensor):
         else:
             prefixed_id = unique_id
         
-        super().__init__(name, prefixed_id, unit, state_class, icon)
+        super().__init__(name, prefixed_id, unit, state_class, icon, device_info)
         self.zone_name = zone_name
         self.metric_key = metric_key
         self.zone = None  # Will be set when attached to zone
@@ -175,7 +186,6 @@ class MultiTRVHeatingEntityManager:
         ("Target Temperature", "target_temperature", _UNIT_TEMP, "measurement", "mdi:target-temperature"),
         ("Temperature Error", "temperature_error", _UNIT_TEMP, "measurement", "mdi:delta"),
         ("TRV Opening", "trv_opening_percent", _UNIT_PERCENT, "measurement", "mdi:percent"),
-        ("Demand Metric", "demand_metric", None, "measurement", "mdi:gauge"),
         ("Is Demanding Heat", "is_demanding_heat", None, None, "mdi:fire"),
         ("Temperature Offset", "temperature_offset", _UNIT_TEMP, "measurement", "mdi:delta"),
         ("Floor Area", "floor_area_m2", "m²", None, "mdi:ruler"),
@@ -183,25 +193,31 @@ class MultiTRVHeatingEntityManager:
         ("External Sensor Temperature", "external_sensor_temperature", _UNIT_TEMP, "measurement", "mdi:thermometer"),
     ]
     
-    def __init__(self, controller, entry_id: Optional[str] = None) -> None:
+    def __init__(self, controller, entry_id: Optional[str] = None,
+                 zone_devices: Optional[dict] = None, controller_device: Optional[Any] = None) -> None:
         """
         Initialize the entity manager.
         
         Args:
             controller: MasterController instance
             entry_id: Config entry ID for prefixing sensor unique IDs
+            zone_devices: Dict mapping climate entity IDs to DeviceInfo dicts
+            controller_device: DeviceInfo dict for controller-level metrics
         """
         self.controller = controller
         self.entry_id = entry_id
+        self.zone_devices = zone_devices or {}
+        self.controller_device = controller_device
         self.controller_sensors = []
         self.zone_sensors = {}  # { zone_entity_id: [sensor1, sensor2, ...] }
         self._create_sensors()
     
     def _create_sensors(self) -> None:
         """Create all sensor entities."""
-        # Create controller sensors
+        # Create controller sensors with controller device info
         for name, unique_id, metric_key, unit, state_class, icon in self.CONTROLLER_SENSORS:
-            sensor = ControllerSensor(name, unique_id, metric_key, unit, state_class, icon, self.entry_id)
+            sensor = ControllerSensor(name, unique_id, metric_key, unit, state_class, icon, self.entry_id,
+                                    self.controller_device)
             sensor.controller = self.controller
             self.controller_sensors.append(sensor)
             _LOGGER.debug("Created controller sensor: %s", name)
@@ -209,8 +225,12 @@ class MultiTRVHeatingEntityManager:
         # Create zone sensors
         for zone_entity_id, zone in self.controller.zones.items():
             zone_sensors = []
+            # Get device info for this zone if available
+            device_info = self.zone_devices.get(zone_entity_id)
+            
             for metric_name, metric_key, unit, state_class, icon in self.ZONE_SENSORS:
-                sensor = ZoneSensor(zone.name, metric_name, metric_key, unit, state_class, icon, self.entry_id)
+                sensor = ZoneSensor(zone.name, metric_name, metric_key, unit, state_class, icon, 
+                                  self.entry_id, device_info)
                 sensor.zone = zone
                 zone_sensors.append(sensor)
                 _LOGGER.debug("Created zone sensor: %s - %s", zone.name, metric_name)
@@ -271,7 +291,32 @@ async def async_setup_entry(
     
     controller = hass.data[DOMAIN][entry.entry_id]
     
-    manager = MultiTRVHeatingEntityManager(controller, entry.entry_id)
+    # Create controller device for controller-level metrics (zone count, flow temp, preheating)
+    controller_device_info = None
+    if DeviceInfo is not None:  # Only if running with Home Assistant
+        controller_device_info = DeviceInfo(
+            identifiers={("multi_trv_heating", f"{entry.entry_id}_controller")},
+            name="Multi-TRV Heating Controller",
+            manufacturer="Multi-TRV Heating",
+            model="System Controller",
+        )
+    
+    # Create device info dicts for each zone based on zone name
+    # Entities with matching identifiers will group under the same device
+    zone_device_infos = {}
+    if DeviceInfo is not None:  # Only if running with Home Assistant
+        for zone_entity_id, zone in controller.zones.items():
+            zone_name_slug = zone.name.lower().replace(" ", "_").replace("-", "_")
+            device_id = f"{entry.entry_id}_{zone_entity_id.replace('.', '_')}"
+            
+            zone_device_infos[zone_entity_id] = DeviceInfo(
+                identifiers={("multi_trv_heating", device_id)},
+                name=zone.name,
+                manufacturer="Multi-TRV Heating",
+                model="Zone Controller",
+            )
+    
+    manager = MultiTRVHeatingEntityManager(controller, entry.entry_id, zone_device_infos, controller_device_info)
     sensors = manager.get_all_sensors()
     
     async_add_entities(sensors, update_before_add=True)

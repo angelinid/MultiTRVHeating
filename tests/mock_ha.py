@@ -145,7 +145,7 @@ class MockClimateEntity:
         """Convert to Home Assistant state dict."""
         return (self.entity_id, {
             'current_temperature': self.current_temperature,
-            'target_temperature': self.target_temperature,
+            'target_temp': self.target_temperature,  # HA uses "target_temp", not "target_temperature"
             'hvac_action': self.hvac_action,
         })
 
