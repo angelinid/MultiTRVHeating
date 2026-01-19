@@ -74,6 +74,10 @@ class MasterController:
         self.hass = hass
         self.zones: dict[str, ZoneWrapper] = {}
         
+        # ========== Component Enable/Disable ==========
+        # Master switch to enable/disable the entire component
+        self.component_enabled = False
+        
         # ========== Pre-heating Configuration ==========
         self.preheating = PreheatingController(self)
         
@@ -228,7 +232,21 @@ class MasterController:
                 try:
                     # Extract opening percentage from sensor state
                     opening_percent = float(new_state.state)
-                    zone.update_trv_opening(opening_percent)
+                    if zone.update_trv_opening(opening_percent):
+                        # Need to update temperature offset in zone
+                        await self.hass.services.async_call(
+                            "number",
+                            "set_value",
+                            {
+                                "entity_id": zone.temp_calib_entity_id,
+                                "value": zone.temperature_offset
+                            },
+                            blocking=False,
+                        )
+                        _LOGGER.debug(
+                            "Zone '%s': Applied offset %.1f°C to %s",
+                            zone.name, zone.temperature_offset, zone.temp_calib_entity_id
+                        )
                     _LOGGER.debug(
                         "Zone '%s': TRV position updated to %.0f%% (from %s)",
                         zone.name, opening_percent, entity_id
@@ -311,6 +329,10 @@ class MasterController:
         6. Convert demand metric to flow temperature and command boiler
         7. Export temperature offset to Home Assistant calibration entities
         """
+        if self.component_enabled is False:
+            _LOGGER.info("Component disabled - skipping boiler calculation")
+            return
+        
         _LOGGER.debug("Calculating boiler command from %d zones", len(self.zones))
         
         # ========== Track high-priority zone demand ==========
@@ -376,10 +398,14 @@ class MasterController:
             )
         
         # Boiler OFF: Neither condition met
+        # Reset all zone temperature offsets when boiler shuts down
         else:
             boiler_should_be_on = False
             boiler_demand = 0.0
             _LOGGER.info("Boiler command: OFF (no demand)")
+            
+            # Reset temperature offsets for all zones when boiler shuts off
+            await self._reset_all_zone_offsets()
         
         # ========== Calculate boiler intensity (Requirement #7) ==========
         # Boiler intensity is proportional to the highest heat demand from any zone
@@ -426,7 +452,7 @@ class MasterController:
         """
         
         # Clamp to safe physical limits
-        final_temp = max(MIN_FLOW_TEMP, min(MAX_FLOW_TEMP, flow_temp))
+        final_temp = max(MIN_FLOW_TEMP, min(MAX_FLOW_TEMP, flow_temp)) if flow_temp > 0 else 0.0
         
         # Track the current flow temperature for sensor reporting
         self.current_flow_temp = final_temp
@@ -435,6 +461,28 @@ class MasterController:
             "Setting OpenTherm flow temperature: requested=%.1f°C, final=%.1f°C",
             flow_temp, final_temp
         )
+    
+    async def _reset_all_zone_offsets(self) -> None:
+        """
+        Reset all zone temperature offsets to 0°C.
+        
+        Called when boiler shuts down to reset all TRV calibration offsets
+        to neutral position. This prevents TRVs from continuing to open
+        after the boiler stops.
+        """
+        for zone in self.zones.values():
+            
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {
+                    "entity_id": zone.temp_calib_entity_id,
+                    "value": zone.temperature_offset
+                },
+                blocking=False,
+            )
+        
+        _LOGGER.debug("All zone temperature offsets reset to 0°C")
 
     def get_controller_state(self) -> dict:
         zones_state = []

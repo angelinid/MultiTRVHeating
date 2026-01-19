@@ -104,7 +104,7 @@ class PumpDischargeController:
         Returns:
             bool: True if this is the discharge TRV
         """
-        return entity_id == self.discharge_trv_entity_id and self.discharge_trv_entity_id is not None
+        return self.is_discharge_active() and entity_id == self.discharge_trv_entity_id and self.discharge_trv_entity_id is not None
     
     def is_discharge_active(self) -> bool:
         """

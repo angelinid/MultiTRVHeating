@@ -73,6 +73,9 @@ class PreheatingController:
         
         # Current pre-heating end time (None = not preheating)
         self.preheating_end_time: Optional[datetime] = None
+
+        # Initialise it as disabled
+        self.is_enabled: bool = False
     
     def is_active(self) -> bool:
         """
@@ -81,7 +84,7 @@ class PreheatingController:
         Returns:
             bool: True if preheating_end_time is set and in the future
         """
-        if self.preheating_end_time is None:
+        if self.preheating_end_time is None or self.is_enabled is False:
             return False
         
         # Check if end time is in the future

@@ -208,12 +208,19 @@ class ZoneWrapper:
         # Clamp to valid range
         opening_percent = max(0.0, min(100.0, opening_percent))
 
+        update_offset = False
+
         # Update heating/cooling status based on current temperature differential
         # Only update status when opening changes (detected by checking if we're in this method)
         if self.trv_opening_percent > opening_percent:
             self.heating_status = 'heating'
         elif self.trv_opening_percent < opening_percent:
             self.heating_status = 'cooling'
+            # Valve is open: Set negative offset to encourage more opening
+            if self.temperature_offset != HEATING_TEMP_OFFSET:
+                update_offset = True
+                self.temperature_offset = HEATING_TEMP_OFFSET
+                _LOGGER.debug("Zone '%s': Valve opened, offset set to %.1f°C", self.name, HEATING_TEMP_OFFSET)
 
         self.trv_opening_percent = opening_percent
         
@@ -223,15 +230,11 @@ class ZoneWrapper:
         )
         
         # Manage temperature offset based on valve state
-        if self.trv_opening_percent > 0.0:
-            # Valve is open: Set negative offset to encourage more opening
-            if self.temperature_offset != HEATING_TEMP_OFFSET:
-                self.temperature_offset = HEATING_TEMP_OFFSET
-                _LOGGER.debug("Zone '%s': Valve opened, offset set to %.1f°C", self.name, HEATING_TEMP_OFFSET)
-        else:
+        if self.trv_opening_percent == 0.0:
             # Valve is closed: Reset offset to 0
-            if self.temperature_offset != 0.0:
-                self.temperature_offset = 0.0
+            if self.temperature_offset != DEFAULT_TEMP_OFFSET:
+                self.temperature_offset = DEFAULT_TEMP_OFFSET
+                update_offset = True
                 _LOGGER.debug("Zone '%s': Valve closed, offset reset to 0°C", self.name)
         
         # Recalculate demand based on new opening percentage
@@ -241,6 +244,7 @@ class ZoneWrapper:
             "Zone '%s': TRV opening updated to %.0f%%, offset=%.1f°C",
             self.name, self.trv_opening_percent, self.temperature_offset
         )
+        return update_offset
 
     def update_external_temperature(self, external_temp: float) -> None:
         """
