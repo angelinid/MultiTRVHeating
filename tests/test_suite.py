@@ -415,18 +415,18 @@ class TestSuite:
         Test: Boiler intensity calculation
         
         Scenario: Zone with 0.5 demand metric
-        Expected: Flow temperature = 5 + (0.5 * 75) = 42.5°C
+        Expected: Flow temperature = 25 + (0.5 * 35) = 42.5°C
         """
         self.log.test_case(
             "Boiler Intensity Calculation",
-            "Verify flow temperature calculation: 5°C at 0 demand, 80°C at 1.0 demand, "
+            "Verify flow temperature calculation: 25°C at 0 demand, 60°C at 1.0 demand, "
             "linear interpolation for 0.5 demand should be 42.5°C."
         )
         
         try:
             # Constants from master_controller
-            MIN_FLOW_TEMP = 5.0
-            MAX_FLOW_TEMP = 80.0
+            MIN_FLOW_TEMP = 25.0
+            MAX_FLOW_TEMP = 60.0
             
             self.log.step(1, "Test demand = 0.0 (boiler OFF)")
             demand = 0.0
@@ -461,12 +461,12 @@ class TestSuite:
         Test: Boiler turns OFF when no zones demand heat
         
         Scenario: All zones at 0% opening
-        Expected: Boiler OFF (flow temp = 5°C)
+        Expected: Boiler OFF (flow temp = 0°C)
         """
         self.log.test_case(
             "Boiler OFF - No Demand",
             "Verify that boiler turns off when no zones have any demand. "
-            "All zones closed, flow temperature should be 5°C (OFF)."
+            "All zones closed, flow temperature should be 0°C (OFF)."
         )
         
         try:
@@ -488,7 +488,7 @@ class TestSuite:
             self.log.step(4, "Verify boiler should be OFF")
             all_demands = [z.get_demand_metric() for z in [zone1, zone2, zone3]]
             max_demand = max(all_demands)
-            boiler_off_temp = 5.0
+            boiler_off_temp = 0.0
             self.log.verify(max_demand == 0.0, "No zone should have demand")
             self.log.info(f"All zones closed: max demand = {max_demand}, boiler OFF at {boiler_off_temp}°C")
             
@@ -790,7 +790,7 @@ class TestSuite:
             all_demands = [living.get_demand_metric(), bedroom.get_demand_metric(),
                           guest.get_demand_metric(), hallway.get_demand_metric()]
             max_demand = max(all_demands)
-            flow_temp = 5.0 + (max_demand * 75.0)
+            flow_temp = 25.0 + (max_demand * 35.0)
             self.log.info(f"Max demand: {max_demand:.3f} → Flow temp: {flow_temp:.1f}°C")
             
             self.log.info("Test PASSED: Realistic house scenario works correctly")

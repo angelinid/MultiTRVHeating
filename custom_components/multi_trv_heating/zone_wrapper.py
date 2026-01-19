@@ -110,6 +110,12 @@ class ZoneWrapper:
         self.trv_opening_percent = 0.0  # TRV valve opening: 0-100%
         self.is_demanding_heat = False  # True if zone needs heat from boiler
         
+        # ========== Zone Heating/Cooling Status ==========
+        # Internal status tracking: 'heating', 'cooling', or 'idle'
+        # Updated only when TRV opening percentage changes
+        # Determined by comparing current_temp vs target_temp
+        self.heating_status = 'idle'  # 'heating' = current_temp < target_temp, 'cooling' = current_temp > target_temp, 'idle' = equal
+        
         # Temperature calibration (offset) control: Adjusts TRV's temperature reading
         # Entity ID for the number entity that controls TRV offset (-5 to +5°C typically)
         self.temp_calib_entity_id = temp_calib_entity_id
@@ -189,6 +195,9 @@ class ZoneWrapper:
         - Low priority zones: Opening >= 100% triggers boiler
         - Low priority zones can aggregate: Multiple zones at 50% = 100% demand
         
+        When opening percentage changes, update the zone's heating/cooling status
+        depending on the opening percentage history.
+        
         Also manages temperature offset (Requirement #8):
         - If valve opens: Set offset to HEATING_TEMP_OFFSET (hardcoded) to encourage more opening
         - If valve closes: Reset offset to 0°C
@@ -197,7 +206,21 @@ class ZoneWrapper:
             opening_percent: TRV valve opening (0-100%)
         """
         # Clamp to valid range
-        self.trv_opening_percent = max(0.0, min(100.0, opening_percent))
+        opening_percent = max(0.0, min(100.0, opening_percent))
+
+        # Update heating/cooling status based on current temperature differential
+        # Only update status when opening changes (detected by checking if we're in this method)
+        if self.trv_opening_percent > opening_percent:
+            self.heating_status = 'heating'
+        elif self.trv_opening_percent < opening_percent:
+            self.heating_status = 'cooling'
+
+        self.trv_opening_percent = opening_percent
+        
+        _LOGGER.debug(
+            "Zone '%s': Opening updated to %.0f%%, status=%s (current=%.1f°C, target=%.1f°C)",
+            self.name, self.trv_opening_percent, self.heating_status, self.current_temp, self.target_temp
+        )
         
         # Manage temperature offset based on valve state
         if self.trv_opening_percent > 0.0:
@@ -254,8 +277,8 @@ class ZoneWrapper:
         """
         # Determine heating demand based on TRV opening and priority level
         if self.is_high_priority:
-            # High priority: Can trigger boiler with any opening > 0%
-            self.is_demanding_heat = self.trv_opening_percent > 0.0
+            # High priority: Can trigger boiler with any opening > HIGH_PRIORITY_MIN_OPENING or if cooling
+            self.is_demanding_heat = self.trv_opening_percent > HIGH_PRIORITY_MIN_OPENING or self.heating_status == 'cooling'
         else:
             # Low priority: Needs 100% opening to trigger on its own
             self.is_demanding_heat = self.trv_opening_percent >= LOW_PRIORITY_MIN_OPENING

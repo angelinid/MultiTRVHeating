@@ -42,6 +42,8 @@ CONF_PRIORITY = "is_high_priority"                        # Zone priority (boole
 CONF_TRV_POSITION_ENTITY_ID = "trv_position_entity_id"    # TRV position sensor entity
 CONF_TEMP_CALIBRATION_ENTITY_ID = "temp_calib_entity_id"  # Temperature calibration (offset) number entity
 CONF_EXT_TEMP_ENTITY_ID = "ext_temp_entity_id"            # Optional external temperature entity
+CONF_DISCHARGE_TRV_ENTITY_ID = "discharge_trv_entity_id"  # Pump discharge TRV entity ID
+CONF_DISCHARGE_TRV_NAME = "discharge_trv_name"            # Pump discharge TRV friendly name
 
 # Define the data schema for the zone configuration
 # This defines the structure of data for each zone
@@ -150,15 +152,8 @@ class OpenThermConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # If yes, go back to the user step to collect data for the next zone
                 return await self.async_step_user()
             
-            # If no, finalize the configuration with all collected zones
-            # Reset the zones list for next time this config flow runs
-            zones = self._zones_config
-            self._zones_config = []
-            
-            return self.async_create_entry(
-                title="Multi-TRV Heating Controller",
-                data={"zones": zones},  # Save the final list of zones
-            )
+            # If no, proceed to discharge TRV selection
+            return await self.async_step_discharge_trv()
 
         # Form to ask if more zones are needed
         return self.async_show_form(
@@ -167,4 +162,55 @@ class OpenThermConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required("add_another", default=True): bool
             }),
             description_placeholders={"current_count": len(self._zones_config)}
+        )
+
+    async def async_step_discharge_trv(self, user_input=None):
+        """
+        Ask user to select which TRV should be used for pump discharge.
+        
+        The pump discharge valve keeps the boiler pump running for ~5 minutes
+        after all zones shut off, preventing water stagnation in the pipes.
+        
+        Args:
+            user_input: Dictionary with optional discharge TRV selection
+        """
+        if user_input is not None:
+            # Store discharge TRV in the first zone config (shared controller setting)
+            discharge_entity_id = user_input.get(CONF_DISCHARGE_TRV_ENTITY_ID)
+            discharge_name = user_input.get(CONF_DISCHARGE_TRV_NAME, "Unknown")
+            
+            if discharge_entity_id:
+                # Add to first zone config as a shared setting
+                if self._zones_config:
+                    self._zones_config[0][CONF_DISCHARGE_TRV_ENTITY_ID] = discharge_entity_id
+                    self._zones_config[0][CONF_DISCHARGE_TRV_NAME] = discharge_name
+            
+            # Finalize the configuration with all collected zones
+            zones = self._zones_config
+            self._zones_config = []
+            
+            return self.async_create_entry(
+                title="Multi-TRV Heating Controller",
+                data={"zones": zones},  # Save the final list of zones
+            )
+
+        # Build list of zone entities for discharge TRV selection
+        zone_choices = {}
+        for zone_config in self._zones_config:
+            entity_id = zone_config.get(CONF_ENTITY_ID)
+            name = zone_config.get(CONF_NAME, entity_id)
+            if entity_id:
+                zone_choices[entity_id] = name
+
+        # Form to select discharge TRV (optional)
+        return self.async_show_form(
+            step_id="discharge_trv",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_DISCHARGE_TRV_ENTITY_ID): vol.In(zone_choices),
+                vol.Optional(CONF_DISCHARGE_TRV_NAME): str,
+            }),
+            description_placeholders={
+                "zone_count": len(self._zones_config),
+                "info": "Select which TRV should be used for pump discharge (optional)"
+            }
         )

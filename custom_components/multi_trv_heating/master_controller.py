@@ -36,9 +36,11 @@ except ImportError:
 try:
     from .zone_wrapper import ZoneWrapper
     from .preheating import PreheatingController
+    from .pump_discharge import PumpDischargeController
 except ImportError:
     from zone_wrapper import ZoneWrapper
     from preheating import PreheatingController
+    from pump_discharge import PumpDischargeController
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -49,14 +51,11 @@ _LOGGER = logging.getLogger("don_controller")
 # OpenTherm Control Constants
 # =========================================================
 
-# Entity ID where OpenTherm flow temperature is set (Home Assistant number entity)
-OPEN_THERM_FLOW_TEMP_ENTITY = "number.opentherm_flow_temp"
+# Flow temperature = 25°C is minimum when boiler is ON
+MIN_FLOW_TEMP = 25.0
 
-# Flow temperature = 5°C is boiler OFF signal (minimum safe temperature)
-MIN_FLOW_TEMP = 5.0
-
-# Flow temperature = 80°C is maximum boiler output (safety limit)
-MAX_FLOW_TEMP = 80.0
+# Flow temperature = 60°C is maximum boiler output (safety limit)
+MAX_FLOW_TEMP = 60.0
 
 # Temperature offset configuration constants
 MIN_TEMP_OFFSET = -5.0  # Minimum offset in degrees Celsius
@@ -77,6 +76,12 @@ class MasterController:
         
         # ========== Pre-heating Configuration ==========
         self.preheating = PreheatingController(self)
+        
+        # ========== Pump Discharge Configuration ==========
+        # Get discharge TRV from config if available
+        discharge_trv_entity_id = zone_configs[0].get('discharge_trv_entity_id') if zone_configs else None
+        discharge_trv_name = zone_configs[0].get('discharge_trv_name') if zone_configs else None
+        self.pump_discharge = PumpDischargeController(hass, discharge_trv_entity_id, discharge_trv_name)
         
         # ========== OpenTherm Configuration ==========
         # Current OpenTherm flow temperature request (for sensor reporting)
@@ -301,9 +306,10 @@ class MasterController:
         1. Check if any high-priority zone is demanding heat -> turn on boiler
         2. Calculate aggregate demand from low-priority zones
         3. If aggregate >= 100%, turn on boiler
-        4. Calculate boiler intensity from highest zone demand
-        5. Convert demand metric to flow temperature and command boiler
-        6. Export temperature offset to Home Assistant calibration entities
+        4. Check if all zones are at 0% or closing (descending trajectory) -> can turn off
+        5. Calculate boiler intensity from highest zone demand
+        6. Convert demand metric to flow temperature and command boiler
+        7. Export temperature offset to Home Assistant calibration entities
         """
         _LOGGER.debug("Calculating boiler command from %d zones", len(self.zones))
         
@@ -318,6 +324,14 @@ class MasterController:
         
         # ========== Analyze all zones ==========
         for zone in self.zones.values():
+            # Skip discharge TRV - it shouldn't influence boiler control
+            if self.pump_discharge.is_discharge_valve(zone.entity_id):
+                _LOGGER.debug(
+                    "Zone '%s' is discharge valve - excluding from boiler calculations",
+                    zone.name
+                )
+                continue
+            
             demand = zone.get_demand_metric()
             
             if zone.is_high_priority:
@@ -389,14 +403,18 @@ class MasterController:
                 boiler_demand, flow_temp
             )
         else:
-            # Boiler OFF: Set to minimum safe temperature
-            flow_temp = MIN_FLOW_TEMP
-            _LOGGER.info("Boiler OFF: Setting flow temp to MIN (%.1f°C)", MIN_FLOW_TEMP)
+            # Boiler OFF: Set to 0°C
+            flow_temp = 0.0
+            _LOGGER.info("Boiler OFF: Setting flow temp to 0°C")
         
         # ========== Send command to boiler ==========
-        await self.async_set_opentherm_flow_temp(flow_temp)
+        self.set_opentherm_flow_temp(flow_temp)
+        
+        # ========== Update pump discharge controller ==========
+        # Pump discharge keeps one TRV open after boiler shuts off to circulate water
+        await self.pump_discharge.evaluate_and_update(boiler_should_be_on)
     
-    async def async_set_opentherm_flow_temp(self, flow_temp: float) -> None:
+    def set_opentherm_flow_temp(self, flow_temp: float) -> None:
         """
         Command the boiler's flow temperature via OpenTherm integration.
         
@@ -417,14 +435,6 @@ class MasterController:
             "Setting OpenTherm flow temperature: requested=%.1f°C, final=%.1f°C",
             flow_temp, final_temp
         )
-        
-        # Call Home Assistant number service to update the entity
-        await self.hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": OPEN_THERM_FLOW_TEMP_ENTITY, "value": final_temp},
-            blocking=False,
-        )
 
     def get_controller_state(self) -> dict:
         zones_state = []
@@ -439,6 +449,7 @@ class MasterController:
             "zones": zones_state,
             "zone_count": len(self.zones),
             "current_flow_temp": self.current_flow_temp,
+            "pump_discharge": self.pump_discharge.get_discharge_state(),
         }
     
     def get_zone_state(self, entity_id: str) -> Optional[dict]:

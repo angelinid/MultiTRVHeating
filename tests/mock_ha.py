@@ -25,6 +25,47 @@ class MockEvent:
     data: Dict[str, Any]
 
 
+class MockServices:
+    """Mock Home Assistant services registry."""
+    
+    def __init__(self):
+        """Initialize mock services."""
+        self.calls: list[Dict[str, Any]] = []
+    
+    async def async_call(self, domain: str, service: str, service_data: Optional[Dict[str, Any]] = None, blocking: bool = False) -> None:
+        """
+        Mock async service call.
+        
+        Args:
+            domain: Service domain (e.g., 'switch', 'number')
+            service: Service name (e.g., 'turn_on', 'set_value')
+            service_data: Service parameters
+            blocking: Whether to wait for service completion
+        """
+        call_record = {
+            'domain': domain,
+            'service': service,
+            'service_data': service_data or {},
+            'blocking': blocking
+        }
+        self.calls.append(call_record)
+
+
+@dataclass
+class MockState:
+    """Mock Home Assistant State object."""
+    entity_id: str
+    state: str
+    attributes: Dict[str, Any]
+    context: Optional[str] = None
+
+
+@dataclass
+class MockEvent:
+    """Mock Home Assistant state change event."""
+    data: Dict[str, Any]
+
+
 class MockHass:
     """
     Mock Home Assistant core instance.
@@ -41,6 +82,7 @@ class MockHass:
         self.services_called: list[Dict[str, Any]] = []
         self.event_listeners: list[Callable] = []
         self.data: Dict[str, Any] = {}
+        self.services = MockServices()  # Add services registry
     
     def set_state(self, entity_id: str, state: str, attributes: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -174,7 +216,7 @@ class MockSensorEntity:
 class MockNumberEntity:
     """Mock number entity (for flow temperature control)."""
     
-    def __init__(self, entity_id: str, value: float = 5.0, min_value: float = 5.0, max_value: float = 80.0):
+    def __init__(self, entity_id: str, value: float = 25.0, min_value: float = 0.0, max_value: float = 60.0):
         """
         Initialize mock number entity.
         
