@@ -1,433 +1,362 @@
-# Multi-TRV Heating Controller - Testing Guide
+# Testing Guide - Multi-TRV Heating Controller
 
 ## Overview
 
-The test suite provides comprehensive validation of the Multi-TRV Heating Controller component without requiring a full Home Assistant installation. Tests are organized into 16 detailed test cases covering basic functionality, multi-zone scenarios, and edge cases.
+The Multi-TRV Heating Controller uses a **rationalized, modular test architecture** with organized test suites grouped by functionality:
 
-## Quick Start
+- **Core Tests** (16 tests) - Essential heating logic ✓ 100% passing
+- **Feature Tests** (22 tests) - Advanced features (pump discharge, pre-heating)
+- **Integration Tests** (39 tests) - Home Assistant sensor integration ✓ 100% passing
 
-### Run All Tests with Info Logging (Recommended)
+**Total: 77 tests across 3 suites**
+
+---
+
+## Architecture
+
+### Test Organization
+
+```
+tests/
+├── test_runner.py                 # Unified test orchestrator
+├── run_tests.sh                   # Shell script wrapper
+│
+├── test_suite.py                  # CORE: Heating logic (16 tests)
+│   ├── Single-zone heating demand
+│   ├── Multi-zone scenarios
+│   ├── Demand aggregation
+│   ├── Boiler control
+│   ├── Temperature offset management
+│   ├── Edge cases
+│   └── Realistic scenarios
+│
+├── test_pump_discharge.py         # FEATURES: Pump discharge (8 tests)
+│   ├── TRV exclusion from calculations
+│   ├── Discharge activation/deactivation
+│   ├── Timeout management
+│   └── State reporting
+│
+├── test_preheating.py             # FEATURES: Pre-heating mode (14 tests)
+│   ├── Activation/deactivation
+│   ├── Thermal load calculation
+│   ├── Flow temperature override
+│   └── Edge cases
+│
+└── test_sensors.py                # INTEGRATION: Sensor entities (39 tests)
+    ├── Entity creation
+    ├── State computation
+    ├── Units and icons
+    └── Manager functionality
+```
+
+### Test Hierarchy
+
+```
+All Tests (77 total)
+│
+├─ Core (16/16 passing) ✓
+│  └─ Essential heating logic - must not break
+│
+├─ Features (8/22 passing)
+│  ├─ Pump Discharge (8 tests)
+│  └─ Pre-heating (14 tests)
+│
+└─ Integration (39/39 passing) ✓
+   └─ Home Assistant sensor integration
+```
+
+---
+
+## Running Tests
+
+### Quick Start
+
+Run **all tests**:
+```bash
+./run_tests.sh
+# or
+python test_runner.py
+```
+
+### Specific Test Suites
+
+Run **only core tests** (fastest, most critical):
+```bash
+./run_tests.sh info core
+python test_runner.py info core
+```
+
+Run **feature tests** only:
+```bash
+./run_tests.sh info features
+python test_runner.py info features
+```
+
+Run **integration tests** only:
+```bash
+./run_tests.sh info integration
+python test_runner.py info integration
+```
+
+### Logging Levels
+
+Control verbosity with log level (default: info):
 
 ```bash
-cd tests/
-python test_suite.py info
+./run_tests.sh debug              # Full debug output
+./run_tests.sh info               # Normal logging (default)
+./run_tests.sh warning            # Warnings only (errors)
 ```
 
-### Run Tests with Debug Logging (Detailed Output)
+### Full Examples
 
 ```bash
-cd tests/
-python test_suite.py debug
+# Run all tests with debug logging
+./run_tests.sh debug all
+
+# Run only core tests with warning level
+./run_tests.sh warning core
+
+# Run features with debug output to diagnose failures
+python test_runner.py debug features
 ```
 
-### Run Tests with Warning Logging (Errors Only)
-
-```bash
-cd tests/
-python test_suite.py warning
-```
-
-### Using the Shell Script
-
-```bash
-cd tests/
-bash run_tests.sh info    # or debug, or warning
-```
-
-## Test Log Files
-
-Tests automatically create timestamped log files in `tests/logs/`:
-
-```
-tests/logs/20251208_214055_multi_trv_heating_results.txt
-```
-
-Each log file contains:
-- Test case descriptions
-- Detailed step-by-step execution
-- Pass/fail verification results
-- Test summary with pass rate
-- All calculated values and state changes
-
-## Test Suite Architecture
-
-### Components
-
-1. **test_logger.py** - Logging infrastructure
-   - Configurable log levels (WARNING, INFO, DEBUG)
-   - Console and file output
-   - Color-coded console display
-   - Formatted, timestamped entries
-
-2. **mock_ha.py** - Home Assistant mocks
-   - MockHass: Simulates HA core functionality
-   - MockState: Climate entity state
-   - MockEvent: State change events
-   - MockClimateEntity: TRV valve simulation
-   - MockSensorEntity: Temperature sensor
-   - MockNumberEntity: Flow temperature control
-
-3. **test_suite.py** - Test cases
-   - 16 comprehensive test cases
-   - Single-zone basic tests
-   - Multi-zone scenarios
-   - Edge cases and corner conditions
-   - Realistic house simulation
-
-### Test Categories
-
-#### 1. Basic Single-Zone Tests (4 tests)
-
-**test_single_zone_low_demand()**
-- Verifies basic zone creation and state update
-- Tests demand metric calculation for low demand
-- Validates high-priority zone trigger at 25% opening
-
-**test_single_zone_high_demand()**
-- Tests high demand scenario (8°C below target, 100% open)
-- Verifies demand metric ~0.8
-
-**test_single_high_priority_zone_trigger()**
-- Tests 25% threshold (should trigger)
-- Tests 24% threshold (should not trigger)
-- Tests 100% threshold (should trigger)
-
-**test_single_low_priority_zone_no_trigger()**
-- Tests 50% opening (should not trigger)
-- Tests 99% opening (should not trigger)
-- Tests 100% opening (should trigger)
-
-#### 2. Multi-Zone Tests (3 tests)
-
-**test_multiple_high_priority_zones()**
-- Two high-priority zones with different demands
-- Verifies both demand heat
-- Confirms highest demand is used for boiler intensity
-
-**test_multiple_low_priority_aggregation()**
-- Three low-priority zones
-- 30% + 30% + 50% = 110% aggregate
-- None trigger alone, aggregate triggers boiler
-
-**test_mixed_priority_zones()**
-- One high-priority (30% opening)
-- One low-priority (40% opening)
-- Verifies high-priority can trigger alone
-
-#### 3. Boiler Control Tests (2 tests)
-
-**test_boiler_intensity_calculation()**
-- Tests flow temperature calculation
-- 0.0 demand → 5°C (OFF)
-- 0.5 demand → 42.5°C (medium)
-- 1.0 demand → 80°C (maximum)
-
-**test_boiler_off_when_no_demand()**
-- All zones at 0% opening
-- No zones demanding
-- Boiler OFF (5°C flow temperature)
-
-#### 4. Temperature Offset Tests (2 tests)
-
-**test_temperature_offset_adjustment()**
-- Set offset from 0 to -2°C
-- Test minimum clamp (-5°C)
-- Test maximum clamp (+5°C)
-
-**test_temperature_offset_reset()**
-- Set offset to -3°C
-- Update zone to target temperature
-- Reset offset to 0
-
-#### 5. Edge Cases (3 tests)
-
-**test_zone_at_target_temperature()**
-- Zone current = target
-- Demand metric = 0 regardless of valve opening
-
-**test_zero_opening_all_zones()**
-- 5 zones with 0% opening
-- All priorities (1.0 down to 0.0)
-- No zones demanding, boiler OFF
-
-**test_rapid_state_changes()**
-- Simulate temperature oscillation around setpoint
-- 8 rapid temperature changes
-- Verify system stability and correct calculations
-
-#### 6. Realistic Scenarios (2 tests)
-
-**test_realistic_house_scenario()**
-- Living Room (high pri): 22°C target, 20°C current, 40% open
-- Bedroom (high pri): 20°C target, 18°C current, 60% open
-- Guest (low pri): 19°C target, 18°C current, 50% open
-- Hallway (low pri): 18°C target, 18°C current, 0% open
-
-Expected Results:
-- Living and Bedroom demand heat (high priority)
-- Guest not demanding alone but included in aggregate
-- Hallway not demanding (at target)
-- Boiler ON, intensity based on highest demand
-
-**test_zone_thermal_influence()**
-- Zone A heating (50% open, 2°C below target)
-- Zone B adjacent, closed initially
-- Zone B temperature rises due to thermal influence
-- When Zone B reaches target, it doesn't add demand
-- Tests realistic multi-zone thermal coupling
-
-## Understanding Test Output
-
-### Console Output
-
-Tests produce color-coded console output:
-
-```
-[INFO    ] 21:40:55 - test_suite - test_case() - 
-[INFO    ] 21:40:55 - test_suite - test_case() - ┌──────────────────────────────────────────────────────────────────────────────┐
-[INFO    ] 21:40:55 - test_suite - test_case() - │ TEST CASE: Single Zone - Low Demand                                           │
-[INFO    ] 21:40:55 - test_suite - test_case() - │ Description of what the test does...                                          │
-[INFO    ] 21:40:55 - test_suite - test_case() - └──────────────────────────────────────────────────────────────────────────────┘
-
-[INFO    ] 21:40:55 - test_suite - step() - 
-  Step 1: Create high-priority zone
-
-[INFO    ] 21:40:55 - test_suite - verify() -     ✓ PASS: Zone should be demanding heat
-
-[INFO    ] 21:40:55 - test_suite - debug() -   → Detailed internal state information
-
-[INFO    ] 21:40:55 - test_suite - info() -   • Important information or result
-```
-
-### Log File Format
-
-Log files contain the same information plus:
-- Exact timestamps for each operation
-- Full details of state changes
-- Calculation intermediate values
-- Summary statistics
-
-Example log entry:
-
-```
-[INFO    ] 21:40:55 - test_suite - step() - 
-  Step 2: Update zone to 2°C below target with 25% valve opening
-
-[DEBUG   ] 21:40:55 - test_suite - debug() -   → Current: 18.0°C, Target: 20.0°C, Error: 2.0°C
-
-[DEBUG   ] 21:40:55 - test_suite - debug() -   → TRV Opening: 25.0%
-
-[INFO    ] 21:40:55 - test_suite - verify() -     ✓ PASS: Zone should be demanding heat (high priority at 25%)
-```
-
-## Test Coverage
-
-### Functionality Tested
-
-✓ Zone initialization and configuration
-✓ State updates (temperature, target, opening %)
-✓ Demand metric calculation
-✓ High-priority zone logic (>0.5 priority)
-✓ Low-priority zone logic (≤0.5 priority)
-✓ Zone aggregation for low-priority zones
-✓ Boiler on/off decisions
-✓ Boiler intensity calculation (flow temperature)
-✓ Temperature offset adjustment
-✓ Temperature offset reset at target
-✓ Edge cases (zero demand, rapid changes, etc.)
-✓ Realistic multi-zone scenarios
-✓ Thermal influence between zones
-
-### Scenarios Covered
-
-- Single zones with varying demands
-- Multiple high-priority zones competing for boiler
-- Multiple low-priority zones aggregating
-- Mixed priority scenarios
-- Zones at target temperature (no demand)
-- Rapid temperature fluctuations
-- Realistic 4-zone house setup
-- Thermal coupling between adjacent zones
-
-## Test Results Interpretation
-
-### Perfect Run (All 16 Tests Pass)
-
-```
-================================================================================
-TEST SUMMARY
-================================================================================
-Total Tests:    16
-Passed:         16 (100.0%)
-Failed:         0
-Test Log File:  /home/don/projects/homeassistant/MultiTRVHeating/tests/logs/20251208_214055_multi_trv_heating_results.txt
-================================================================================
-```
-
-### Failed Test
-
-If a test fails, the log will show:
-
-```
-[ERROR  ] ... - verify() -     ✗ FAIL: Zone should be demanding heat (high priority at 25%)
-```
-
-Then check:
-1. The calculation details logged before the failure
-2. The expected vs actual values
-3. The component code for the failing condition
-
-## Adding New Tests
-
-To add a new test case:
-
-1. Add a new method to the `TestSuite` class:
-
+---
+
+## Test Status Summary
+
+### ✓ PASSING (55/77 = 71.4%)
+
+#### Core Tests: 16/16 (100%)
+Essential heating control logic - **CRITICAL PATH**
+
+| Test | Purpose |
+|------|---------|
+| Single Zone - Low Demand | Basic zone heating |
+| Single Zone - High Demand | Maximum demand calculation |
+| High-Priority Zone Trigger | Boiler activation at 25%+ opening |
+| Low-Priority Zone - No Solo Trigger | 100% opening required |
+| Multiple High-Priority Zones | Highest demand wins |
+| Low-Priority Zone Aggregation | Multiple zones sum to 100% |
+| Mixed Priority Zones | High priority overrides low |
+| Boiler Intensity Calculation | Linear demand → flow temp |
+| Boiler OFF - No Demand | Proper shutdown |
+| Temperature Offset Adjustment | Offset at 75%+ opening |
+| Temperature Offset Reset | Reset on valve close |
+| Zone At Target Temperature | Zero demand when satisfied |
+| All Zones Closed | Boiler stays OFF |
+| Rapid State Changes | Stability under oscillation |
+| Realistic House Scenario | 4-zone mixed priorities |
+| Zone Thermal Influence | Adjacent zone heating |
+
+#### Integration Tests: 39/39 (100%)
+Home Assistant sensor entity management - **COMPLETE**
+
+| Test Group | Status |
+|-----------|--------|
+| Sensor creation | ✓ 7/7 |
+| State computation | ✓ 8/8 |
+| Unit reporting | ✓ 7/7 |
+| Icon configuration | ✓ 1/1 |
+| Manager functionality | ✓ 16/16 |
+
+### ✗ FAILING (22/77 = 28.6%)
+
+#### Feature Tests: 8/22 (36.4%)
+
+**Pump Discharge: 0/8** (needs implementation alignment)
+- TRV exclusion from calculation
+- Discharge activation/deactivation
+- Timeout management
+- State reporting
+
+**Pre-heating: 6/14** (missing implementation)
+- Activation/deactivation: ✓ 3/3
+- Thermal load: ✓ 3/3  
+- Flow temp calculation: ✗ 0/4
+- Edge cases: ✗ 0/4
+
+---
+
+## Test Development Guidelines
+
+### Adding New Tests
+
+1. **Determine the category**: Core, Feature, or Integration
+2. **Add to appropriate file**:
+   - `test_suite.py` - Heating logic
+   - `test_pump_discharge.py` - Pump discharge feature
+   - `test_preheating.py` - Pre-heating feature
+   - `test_sensors.py` - Sensor entities
+
+3. **Follow the pattern**:
 ```python
-async def test_new_scenario(self) -> None:
-    """
-    Test: Brief description
-    
-    Scenario: What this tests
-    Expected: What should happen
-    """
-    self.log.test_case(
-        "Test Name",
-        "Detailed description of what the test validates."
-    )
+async def test_my_feature(self) -> None:
+    """Test: My feature description"""
+    self.log.test_case("My Feature", "Detailed description")
     
     try:
-        self.log.step(1, "First step description")
+        self.log.step(1, "Setup")
         # ... test code ...
         
-        self.log.verify(condition, "Verification message")
-        
-        self.log.info("Test PASSED: Description")
+        self.log.verify(condition, "Message")
         self.passed_tests += 1
-        
     except AssertionError as e:
         self.log.warning(str(e))
         self.failed_tests += 1
 ```
 
-2. Add it to `run_all_tests()`:
-
-```python
-async def run_all_tests(self) -> None:
-    """Run all test cases in sequence."""
-    try:
-        # ... existing tests ...
-        await self.test_new_scenario()  # Add your test here
-    except Exception as e:
-        # ...
+4. **Run only your test suite during development**:
+```bash
+python test_suite.py debug  # For test_suite.py changes
+python test_runner.py debug features  # For feature tests
 ```
 
-## Debugging Tips
+---
 
-### Enable Debug Logging
+## Diagnostic Tips
+
+### Core Tests Failing?
+- Check [test_suite.py](test_suite.py) - tests the heating algorithm
+- Likely issue: Changes to `zone_wrapper.py` or `master_controller.py`
+- **Action**: Review zone demand logic and boiler control
+
+### Integration Tests Failing?
+- Check [test_sensors.py](test_sensors.py) - tests sensor entity creation
+- Likely issue: Changes to `sensor.py` or entity definitions
+- **Action**: Review sensor entity creation and state computation
+
+### Feature Tests Failing?
+- Check [test_pump_discharge.py](test_pump_discharge.py) or [test_preheating.py](test_preheating.py)
+- These are advanced features - likely not critical for core heating
+- **Action**: Either fix implementation or update tests to match new behavior
+
+---
+
+## Continuous Integration
+
+The unified test runner is designed for CI/CD integration:
 
 ```bash
-python test_suite.py debug
+# Example for GitHub Actions / GitLab CI
+python test_runner.py warning all
+exit_code=$?
+if [ $exit_code -ne 0 ]; then
+    echo "Tests failed!"
+    exit 1
+fi
 ```
 
-Debug output includes:
-- Intermediate calculation values
-- State transitions
-- All zone attributes before/after updates
+### Exit Codes
+- `0` - All tests passed
+- `1` - One or more tests failed
 
-### Check Specific Test
+---
 
-Edit `test_suite.py` and modify `run_all_tests()` to run only one test:
+## Performance
 
-```python
-async def run_all_tests(self) -> None:
-    try:
-        await self.test_single_zone_low_demand()  # Only this one
-    except Exception as e:
-        # ...
+Test execution times (approximate):
+
+| Suite | Time | Count |
+|-------|------|-------|
+| Core | ~2 sec | 16 |
+| Features | ~3 sec | 22 |
+| Integration | ~1 sec | 39 |
+| **Total** | **~6 sec** | **77** |
+
+Run `time ./run_tests.sh` to measure on your system.
+
+---
+
+## Test Logs
+
+Test logs are automatically saved to `logs/` directory:
+
+```
+logs/
+├── 20260120_215714_multi_trv_heating_results.txt
+├── 20260120_215728_preheating_tests_results.txt
+├── 20260120_215741_pump_discharge_tests_results.txt
+└── 20260120_215742_sensor_tests_results.txt
 ```
 
-### View Recent Log Files
+Each log contains:
+- Full test output
+- Detailed steps and verifications
+- Timestamps
+- Log level-specific filtering
 
-```bash
-ls -lt tests/logs/ | head -5
-tail -f tests/logs/20251208_214055_multi_trv_heating_results.txt
-```
-
-### Analyze Test Failures
-
-1. Look at the log file for the failing test
-2. Find the step where it fails
-3. Check the calculated values in debug output
-4. Compare with expected values in the test case
-5. Review the component code for the relevant logic
-
-## Performance Notes
-
-- Full test suite runs in ~0.5 seconds
-- 16 comprehensive tests with detailed logging
-- No dependencies on Home Assistant or hardware
-- All mocked interactions
-- Suitable for CI/CD pipelines
-
-## Future Test Enhancements
-
-Potential additions to the test suite:
-
-1. **Thermal Model Tests**: Simulate realistic heat transfer between zones
-2. **Time-Series Tests**: Multi-step scenarios tracking temperature over time
-3. **Stress Tests**: High number of zones (50+)
-4. **Performance Tests**: Measurement of decision calculation time
-5. **Integration Tests**: Mock full component lifecycle (init → updates → shutdown)
-6. **Property-Based Tests**: Using hypothesis library for generated test cases
+---
 
 ## Troubleshooting
 
 ### Tests Won't Run
-
 ```bash
-cd tests/
-python -m py_compile test_suite.py mock_ha.py test_logger.py
+# Check Python path
+python -c "import sys; print(sys.path)"
+
+# Verify imports
+python -c "from test_logger import create_test_logger"
+
+# Run with full traceback
+python test_runner.py warning all
 ```
 
-Check for syntax errors in component files:
-
+### Permission Denied on run_tests.sh
 ```bash
-python -m py_compile ../custom_components/multi_trv_heating/*.py
+chmod +x run_tests.sh
+./run_tests.sh
 ```
 
-### Import Errors
+### Mixed Test Results Expected?
+- Core tests (16) should ALWAYS pass - these are critical
+- Integration tests (39) should ALWAYS pass - sensors are complete
+- Feature tests (22) may fail if features are not fully implemented
+- Update feature test expectations if implementation changes
 
-Verify path setup in test_suite.py:
+---
 
-```python
-sys.path.insert(0, str(Path(__file__).parent.parent / 'custom_components' / 'multi_trv_heating'))
-sys.path.insert(0, str(Path(__file__).parent))
-```
+## Architecture Rationale
 
-### Log Files Not Created
+This test architecture provides:
 
-Verify `logs/` directory exists:
+1. **Clear Separation of Concerns**
+   - Core logic isolated from features
+   - Integration tests independent of implementation details
 
-```bash
-mkdir -p tests/logs/
-```
+2. **Scalability**
+   - Easy to add new tests to any suite
+   - Unified runner scales with new suites
 
-### Tests Fail with Different Results
+3. **Meaningful Feedback**
+   - Know exactly which component is broken
+   - Core tests are safety net for regressions
 
-Check if component code has changed. Re-run tests with debug logging:
+4. **CI/CD Integration**
+   - Single exit code for build systems
+   - Flexible suite selection for different pipelines
+   - Log retention for debugging
 
-```bash
-python test_suite.py debug
-```
+5. **Development Workflow**
+   - Run only relevant tests during development
+   - Full regression testing before commit
+   - Fast feedback loop with individual test files
 
-Compare output with previous successful runs.
+---
 
-## Support
+## Next Steps
 
-For issues or enhancements:
-1. Check test output and log files
-2. Enable debug logging for detailed trace
-3. Compare with recent log files to see changes
-4. Review component code changes
-5. Add new tests for new functionality
+### To Fix Feature Tests
+1. **Pump Discharge**: Align tests with actual discharge behavior
+2. **Pre-heating**: Implement missing flow temperature calculations
+
+### To Extend Testing
+1. Add new core tests as heating logic evolves
+2. Add feature tests for new components
+3. Add integration tests for new sensor entities
+
+### Future Improvements
+- Parametrized tests for multiple scenarios
+- Performance benchmarking
+- Coverage reporting
+- Mutation testing for algorithm validation
