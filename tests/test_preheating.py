@@ -16,8 +16,8 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'custom_components', 'multi_trv_heating'))
 
 from zone_wrapper import ZoneWrapper
-from master_controller import MasterController, MIN_FLOW_TEMP, MAX_FLOW_TEMP
-from preheating import PreheatingController, PREHEATING_TUNING_CONSTANT
+from master_controller import MasterController
+from preheating import PreheatingController, PREHEATING_TUNING_CONSTANT, MIN_FLOW_TEMP, MAX_FLOW_TEMP
 
 
 class MockHomeAssistant:
@@ -118,6 +118,7 @@ class TestPreheating:
         # Set end time 30 minutes in future
         future_time = datetime.now() + timedelta(minutes=30)
         self.controller.preheating.preheating_end_time = future_time
+        self.controller.preheating.is_enabled = True
         
         is_active = self.controller.preheating.is_active()
         self.verify(is_active, "Pre-heating should be active when end time is in future")
@@ -222,6 +223,7 @@ class TestPreheating:
         # Activate pre-heating: 30 minutes from now
         end_time = datetime.now() + timedelta(minutes=30)
         self.controller.preheating.preheating_end_time = end_time
+        self.controller.preheating.is_enabled = True
         
         flow_temp = self.controller.preheating.calculate_flow_temp_override()
         
@@ -253,11 +255,13 @@ class TestPreheating:
         # Flow temp with 30 minutes remaining
         end_time_30min = datetime.now() + timedelta(minutes=30)
         self.controller.preheating.preheating_end_time = end_time_30min
+        self.controller.preheating.is_enabled = True
         flow_temp_30min = self.controller.preheating.calculate_flow_temp_override()
         
         # Flow temp with 5 minutes remaining (6x time pressure)
         end_time_5min = datetime.now() + timedelta(minutes=5)
         self.controller.preheating.preheating_end_time = end_time_5min
+        self.controller.preheating.is_enabled = True
         flow_temp_5min = self.controller.preheating.calculate_flow_temp_override()
         
         self.verify(
@@ -280,6 +284,7 @@ class TestPreheating:
         # End time in 1 second
         end_time = datetime.now() + timedelta(seconds=1)
         self.controller.preheating.preheating_end_time = end_time
+        self.controller.preheating.is_enabled = True
         
         flow_temp = self.controller.preheating.calculate_flow_temp_override()
         
@@ -313,6 +318,7 @@ class TestPreheating:
         # 30 minutes remaining
         end_time = datetime.now() + timedelta(minutes=30)
         self.controller.preheating.preheating_end_time = end_time
+        self.controller.preheating.is_enabled = True
         
         flow_temp = self.controller.preheating.calculate_flow_temp_override()
         
