@@ -35,10 +35,12 @@ except ImportError:
 
 try:
     from .zone_wrapper import ZoneWrapper
+    from .zone_wrapper import DEFAULT_TEMP_OFFSET
     from .preheating import PreheatingController
     from .pump_discharge import PumpDischargeController
 except ImportError:
     from zone_wrapper import ZoneWrapper
+    from zone_wrapper import DEFAULT_TEMP_OFFSET
     from preheating import PreheatingController
     from pump_discharge import PumpDischargeController
 
@@ -471,7 +473,7 @@ class MasterController:
         after the boiler stops.
         """
         for zone in self.zones.values():
-            
+            zone.temperature_offset = DEFAULT_TEMP_OFFSET
             await self.hass.services.async_call(
                 "number",
                 "set_value",
@@ -481,6 +483,7 @@ class MasterController:
                 },
                 blocking=False,
             )
+            _LOGGER.debug("Zone '%s' temperature offset set to %d°C", zone.name, zone.temperature_offset)
         
         _LOGGER.debug("All zone temperature offsets reset to 0°C")
 

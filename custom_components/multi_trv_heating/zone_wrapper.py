@@ -37,6 +37,7 @@ MIN_TEMP_OFFSET = -5.0  # Minimum offset in degrees Celsius
 MAX_TEMP_OFFSET = 5.0   # Maximum offset in degrees Celsius
 DEFAULT_TEMP_OFFSET = 0.0  # Default (no offset)
 HEATING_TEMP_OFFSET = -2.0  # Offset applied when heating
+HEATING_TEMP_OFFSET_THRESHOLD = 75.0  # Only apply heating offset if valve opening > 75%
 
 # TRV opening thresholds for heat demand triggers
 HIGH_PRIORITY_MIN_OPENING = 25.0  # High priority zones trigger boiler at 25% opening
@@ -217,7 +218,7 @@ class ZoneWrapper:
         elif self.trv_opening_percent < opening_percent:
             self.heating_status = 'cooling'
             # Valve is open: Set negative offset to encourage more opening
-            if self.temperature_offset != HEATING_TEMP_OFFSET:
+            if self.temperature_offset != HEATING_TEMP_OFFSET and opening_percent > HEATING_TEMP_OFFSET_THRESHOLD:
                 update_offset = True
                 self.temperature_offset = HEATING_TEMP_OFFSET
                 _LOGGER.debug("Zone '%s': Valve opened, offset set to %.1f°C", self.name, HEATING_TEMP_OFFSET)
@@ -282,7 +283,7 @@ class ZoneWrapper:
         # Determine heating demand based on TRV opening and priority level
         if self.is_high_priority:
             # High priority: Can trigger boiler with any opening > HIGH_PRIORITY_MIN_OPENING or if cooling
-            self.is_demanding_heat = self.trv_opening_percent > HIGH_PRIORITY_MIN_OPENING or self.heating_status == 'cooling'
+            self.is_demanding_heat = self.current_error > 0 or self.heating_status == 'cooling'
         else:
             # Low priority: Needs 100% opening to trigger on its own
             self.is_demanding_heat = self.trv_opening_percent >= LOW_PRIORITY_MIN_OPENING
