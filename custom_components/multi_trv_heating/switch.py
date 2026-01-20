@@ -202,7 +202,7 @@ class ComponentEnableSwitch(MultiTRVHeatingSwitch):
         self._attr_has_entity_name = True
         
         # Default: component is enabled
-        self._is_on = True
+        self._is_on = False
     
     @property
     def is_on(self) -> bool:
