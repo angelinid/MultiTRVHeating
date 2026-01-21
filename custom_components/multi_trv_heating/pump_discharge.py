@@ -72,6 +72,7 @@ class PumpDischargeController:
         # State tracking
         self.is_discharging = False  # Is boost switch currently ON?
         self.discharge_start_time = 0.0  # Timestamp when discharge started
+        self.boiler_was_on = False  # Track previous boiler state for transition detection
         
         _LOGGER.info(
             "PumpDischargeController initialized: discharge_trv=%s (%s)",
@@ -123,15 +124,15 @@ class PumpDischargeController:
         
         Logic:
         1. If boiler should be ON → disable discharge (zones need heat)
-        2. If boiler OFF and no zones demanding → enable discharge (keep pump circulating)
+        2. If boiler transitions from ON to OFF → enable discharge (keep pump circulating)
         3. If discharge running and timeout elapsed → disable discharge
-        4. If discharge running and zone reactivates → disable discharge
+        4. If boiler reactivates while discharging → disable discharge
 
         Args:
             boiler_should_be_on: Whether boiler should be running (from master controller)
-            any_zone_demanding: Whether any zone is currently demanding heat
         """
         if self.discharge_trv_entity_id is None:
+            self.boiler_was_on = boiler_should_be_on
             return
         
         # Case 1: Boiler should be ON → disable discharge (zones need heat)
@@ -141,10 +142,22 @@ class PumpDischargeController:
                 _LOGGER.info(
                     "PumpDischarge: Disabling discharge (boiler activated, zones need heat)"
                 )
+            self.boiler_was_on = True
             return
         
-        # Case 2: Boiler OFF and no zones demanding → manage discharge state
-        if self.is_discharging:
+        # Case 2: Boiler OFF - manage discharge state
+        # Only activate discharge on transition FROM ON to OFF (not continuously when OFF)
+        boiler_just_turned_off = self.boiler_was_on and not boiler_should_be_on
+        self.boiler_was_on = boiler_should_be_on
+        
+        if boiler_just_turned_off and not self.is_discharging:
+            # Boiler just turned off - start discharge to keep pump running
+            await self._enable_discharge()
+            _LOGGER.info(
+                "PumpDischarge: Boiler OFF - Starting discharge for valve '%s' (timeout=%.0fs)",
+                self.discharge_trv_name, PUMP_DISCHARGE_TIMEOUT
+            )
+        elif self.is_discharging:
             # Already discharging, check timeout
             elapsed = time.time() - self.discharge_start_time
             if elapsed > PUMP_DISCHARGE_TIMEOUT:
@@ -153,13 +166,6 @@ class PumpDischargeController:
                     "PumpDischarge: Timeout elapsed (%.0fs > %.0fs), disabling discharge",
                     elapsed, PUMP_DISCHARGE_TIMEOUT
                 )
-        else:
-            # Not discharging yet, start discharge
-            await self._enable_discharge()
-            _LOGGER.info(
-                "PumpDischarge: Starting discharge for valve '%s' (timeout=%.0fs)",
-                self.discharge_trv_name, PUMP_DISCHARGE_TIMEOUT
-            )
     
     async def _enable_discharge(self) -> None:
         """

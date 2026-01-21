@@ -215,10 +215,12 @@ class ZoneWrapper:
         # Only update status when opening changes (detected by checking if we're in this method)
         if self.trv_opening_percent > opening_percent:
             self.heating_status = 'heating'
-        elif self.trv_opening_percent < opening_percent:
+        elif self.trv_opening_percent < opening_percent and opening_percent > HEATING_TEMP_OFFSET_THRESHOLD:
+            # I don't remember why we need opening_percent > HEATING_TEMP_OFFSET_THRESHOLD,
+            # but it's related to self.is_demanding_heat = self.current_error > 0 or self.heating_status == 'cooling'
             self.heating_status = 'cooling'
             # Valve is open: Set negative offset to encourage more opening
-            if self.temperature_offset != HEATING_TEMP_OFFSET and opening_percent > HEATING_TEMP_OFFSET_THRESHOLD:
+            if self.temperature_offset != HEATING_TEMP_OFFSET:
                 update_offset = True
                 self.temperature_offset = HEATING_TEMP_OFFSET
                 _LOGGER.debug("Zone '%s': Valve opened, offset set to %.1f°C", self.name, HEATING_TEMP_OFFSET)

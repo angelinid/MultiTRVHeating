@@ -23,7 +23,7 @@ SOFTWARE.
 """
 
 import logging
-import time
+import asyncio
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
@@ -204,6 +204,9 @@ class MasterController:
         if zone and new_state:
             zone.update_from_state(new_state)
             _LOGGER.debug("Zone '%s' updated from climate entity", zone.name)
+        
+        # Recalculate boiler command
+        await self._calculate_and_command()
     
     async def _async_position_change(self, event) -> None:
         """
@@ -436,13 +439,13 @@ class MasterController:
             _LOGGER.info("Boiler OFF: Setting flow temp to 0°C")
         
         # ========== Send command to boiler ==========
-        self.set_opentherm_flow_temp(flow_temp)
+        await self.set_opentherm_flow_temp(flow_temp)
         
         # ========== Update pump discharge controller ==========
         # Pump discharge keeps one TRV open after boiler shuts off to circulate water
         await self.pump_discharge.evaluate_and_update(boiler_should_be_on)
     
-    def set_opentherm_flow_temp(self, flow_temp: float) -> None:
+    async def set_opentherm_flow_temp(self, flow_temp: float) -> None:
         """
         Command the boiler's flow temperature via OpenTherm integration.
         
@@ -455,6 +458,10 @@ class MasterController:
         
         # Clamp to safe physical limits
         final_temp = max(MIN_FLOW_TEMP, min(MAX_FLOW_TEMP, flow_temp)) if flow_temp > 0 else 0.0
+        
+        if self.current_flow_temp == 0 and final_temp > 0 and self.hass:
+            # Give time to the valves to fully open (only in production with real HA instance)
+            await asyncio.sleep(10)
         
         # Track the current flow temperature for sensor reporting
         self.current_flow_temp = final_temp
