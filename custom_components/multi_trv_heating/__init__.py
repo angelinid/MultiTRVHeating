@@ -27,23 +27,29 @@ SOFTWARE.
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from .master_controller import MasterController
+from .storage import StateStorage, set_storage
 
 DOMAIN = "multi_trv_heating"
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up MasterController from a config entry (UI setup)."""
     
-    # 1. Load configuration from the UI entry
+    # 1. Initialize state storage
+    storage = StateStorage(hass)
+    await storage.async_load()
+    set_storage(storage)
+    
+    # 2. Load configuration from the UI entry
     zone_configs = entry.data.get("zones", [])
     
-    # 2. Instantiate and store the controller
+    # 3. Instantiate and store the controller
     controller = MasterController(hass, zone_configs)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = controller
     
-    # 3. Start listening to events
+    # 4. Start listening to events
     await controller.async_start_listening()
     
-    # 4. Set up sensor, switch, number, and select platforms to expose controller and zone state
+    # 5. Set up sensor, switch, number, and select platforms to expose controller and zone state
     # Home Assistant will automatically discover and call async_setup_entry in sensor.py, switch.py, number.py, select.py
     # Entities will create their own DeviceInfo and group automatically by matching identifiers
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "switch", "number", "select"])

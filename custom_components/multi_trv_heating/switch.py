@@ -23,6 +23,8 @@ except ImportError:
     ConfigEntry = None
     DeviceInfo = None
 
+from .storage import get_storage
+
 _LOGGER = logging.getLogger("don_controller")
 
 
@@ -56,7 +58,8 @@ class ZonePrioritySwitch(MultiTRVHeatingSwitch):
     """
     
     def __init__(self, zone_name: str, zone_entity_id: str, zone,
-                 entry_id: Optional[str] = None, device_info: Optional[Any] = None) -> None:
+                 entry_id: Optional[str] = None, device_info: Optional[Any] = None,
+                 hass: Optional[Any] = None) -> None:
         """
         Initialize zone priority switch.
         
@@ -66,6 +69,7 @@ class ZonePrioritySwitch(MultiTRVHeatingSwitch):
             zone: ZoneWrapper instance
             entry_id: Config entry ID for prefixing unique IDs
             device_info: Device info dict for grouping
+            hass: Home Assistant instance for state restoration
         """
         name = f"{zone_name} Priority (High)"
         zone_name_lower = zone_name.lower().replace(" ", "_")
@@ -79,7 +83,21 @@ class ZonePrioritySwitch(MultiTRVHeatingSwitch):
         super().__init__(name, prefixed_id, "mdi:priority-high", device_info)
         self.zone = zone
         self.zone_entity_id = zone_entity_id
-        self._attr_is_on = zone.is_high_priority if zone else True
+        self.hass = hass
+        
+        # Restore state from storage if available
+        storage = get_storage()
+        if storage:
+            stored_value = storage.get(f"zone_priority_{prefixed_id}")
+            if stored_value is not None:
+                self._attr_is_on = stored_value
+                if self.zone:
+                    self.zone.is_high_priority = stored_value
+                _LOGGER.info("Restored zone %s priority from storage: %s", zone_name, stored_value)
+            else:
+                self._attr_is_on = zone.is_high_priority if zone else True
+        else:
+            self._attr_is_on = zone.is_high_priority if zone else True
     
     @property
     def is_on(self) -> bool:
@@ -90,14 +108,24 @@ class ZonePrioritySwitch(MultiTRVHeatingSwitch):
         """Turn on - set zone to high priority."""
         if self.zone:
             self.zone.is_high_priority = True
+            self._attr_is_on = True
             self.async_write_ha_state()
+            # Persist state to storage
+            storage = get_storage()
+            if storage:
+                await storage.async_set_and_save(f"zone_priority_{self._attr_unique_id}", True)
             _LOGGER.info("Set zone %s to high priority", self.zone.name)
     
     async def async_turn_off(self, **kwargs) -> None:
         """Turn off - set zone to low priority."""
         if self.zone:
             self.zone.is_high_priority = False
+            self._attr_is_on = False
             self.async_write_ha_state()
+            # Persist state to storage
+            storage = get_storage()
+            if storage:
+                await storage.async_set_and_save(f"zone_priority_{self._attr_unique_id}", False)
             _LOGGER.info("Set zone %s to low priority", self.zone.name)
 
 
@@ -110,7 +138,8 @@ class PreheatingEnableSwitch(MultiTRVHeatingSwitch):
     """
     
     def __init__(self, controller, entry_id: Optional[str] = None,
-                 controller_device: Optional[Any] = None) -> None:
+                 controller_device: Optional[Any] = None,
+                 hass: Optional[Any] = None) -> None:
         """
         Initialize the preheating enable switch.
         
@@ -118,6 +147,7 @@ class PreheatingEnableSwitch(MultiTRVHeatingSwitch):
             controller: MasterController instance
             entry_id: Config entry ID for prefixing unique IDs
             controller_device: Device info dict for controller device
+            hass: Home Assistant instance for state restoration
         """
         # Create unique ID
         if entry_id:
@@ -133,10 +163,23 @@ class PreheatingEnableSwitch(MultiTRVHeatingSwitch):
         )
         
         self.controller = controller
+        self.hass = hass
         self._attr_has_entity_name = True
         
-        # Initial state: check if preheating is available and enabled
-        self._update_state()
+        # Restore state from storage if available
+        storage = get_storage()
+        if storage:
+            stored_value = storage.get(f"preheating_enabled_{unique_id}")
+            if stored_value is not None:
+                self._is_on = stored_value
+                if self.controller and self.controller.preheating:
+                    self.controller.preheating.is_enabled = stored_value
+                _LOGGER.info("Restored preheating state from storage: %s", stored_value)
+            else:
+                self._update_state()
+        else:
+            # Initial state: check if preheating is available and enabled
+            self._update_state()
     
     def _update_state(self) -> None:
         """Update the switch state based on preheating controller."""
@@ -155,16 +198,24 @@ class PreheatingEnableSwitch(MultiTRVHeatingSwitch):
         if self.controller and self.controller.preheating:
             self.controller.preheating.is_enabled = True
             self._is_on = True
-            _LOGGER.info("Preheating enabled via switch")
             self.async_write_ha_state()
+            # Persist state to storage
+            storage = get_storage()
+            if storage:
+                await storage.async_set_and_save(f"preheating_enabled_{self._attr_unique_id}", True)
+            _LOGGER.info("Preheating enabled via switch")
     
     async def async_turn_off(self, **kwargs) -> None:
         """Disable preheating."""
         if self.controller and self.controller.preheating:
             self.controller.preheating.is_enabled = False
             self._is_on = False
-            _LOGGER.info("Preheating disabled via switch")
             self.async_write_ha_state()
+            # Persist state to storage
+            storage = get_storage()
+            if storage:
+                await storage.async_set_and_save(f"preheating_enabled_{self._attr_unique_id}", False)
+            _LOGGER.info("Preheating disabled via switch")
 
 
 class ComponentEnableSwitch(MultiTRVHeatingSwitch):
@@ -176,7 +227,8 @@ class ComponentEnableSwitch(MultiTRVHeatingSwitch):
     """
     
     def __init__(self, controller, entry_id: Optional[str] = None,
-                 controller_device: Optional[Any] = None) -> None:
+                 controller_device: Optional[Any] = None,
+                 hass: Optional[Any] = None) -> None:
         """
         Initialize the component enable switch.
         
@@ -184,6 +236,7 @@ class ComponentEnableSwitch(MultiTRVHeatingSwitch):
             controller: MasterController instance
             entry_id: Config entry ID for prefixing unique IDs
             controller_device: Device info dict for controller device
+            hass: Home Assistant instance for state restoration
         """
         # Create unique ID
         if entry_id:
@@ -199,10 +252,25 @@ class ComponentEnableSwitch(MultiTRVHeatingSwitch):
         )
         
         self.controller = controller
+        self.hass = hass
         self._attr_has_entity_name = True
         
-        # Default: component is enabled
-        self._is_on = False
+        # Restore state from storage if available, otherwise default to enabled
+        storage = get_storage()
+        if storage:
+            stored_value = storage.get(f"component_enabled_{unique_id}")
+            if stored_value is not None:
+                self._is_on = stored_value
+                self.controller.component_enabled = stored_value
+                _LOGGER.info("Restored component enabled state from storage: %s", stored_value)
+            else:
+                # Default: component is enabled
+                self._is_on = True
+                self.controller.component_enabled = True
+        else:
+            # Default: component is enabled
+            self._is_on = True
+            self.controller.component_enabled = True
     
     @property
     def is_on(self) -> bool:
@@ -213,15 +281,23 @@ class ComponentEnableSwitch(MultiTRVHeatingSwitch):
         """Enable the component."""
         self.controller.component_enabled = True
         self._is_on = True
-        _LOGGER.info("MultiTRVHeating component enabled")
         self.async_write_ha_state()
+        # Persist state to storage
+        storage = get_storage()
+        if storage:
+            await storage.async_set_and_save(f"component_enabled_{self._attr_unique_id}", True)
+        _LOGGER.info("MultiTRVHeating component enabled")
     
     async def async_turn_off(self, **kwargs) -> None:
         """Disable the component."""
         self.controller.component_enabled = False
         self._is_on = False
-        _LOGGER.info("MultiTRVHeating component disabled")
         self.async_write_ha_state()
+        # Persist state to storage
+        storage = get_storage()
+        if storage:
+            await storage.async_set_and_save(f"component_enabled_{self._attr_unique_id}", False)
+        _LOGGER.info("MultiTRVHeating component disabled")
 
 
 async def async_setup_entry(
@@ -271,7 +347,8 @@ async def async_setup_entry(
             zone_entity_id,
             zone,
             entry.entry_id,
-            device_info
+            device_info,
+            hass
         )
         switches.append(switch)
         _LOGGER.debug("Created priority switch for zone: %s", zone.name)
@@ -290,7 +367,8 @@ async def async_setup_entry(
     preheating_switch = PreheatingEnableSwitch(
         controller=controller,
         entry_id=entry.entry_id,
-        controller_device=controller_device
+        controller_device=controller_device,
+        hass=hass
     )
     switches.append(preheating_switch)
     _LOGGER.debug("Created preheating enable switch")
@@ -299,7 +377,8 @@ async def async_setup_entry(
     component_switch = ComponentEnableSwitch(
         controller=controller,
         entry_id=entry.entry_id,
-        controller_device=controller_device
+        controller_device=controller_device,
+        hass=hass
     )
     switches.append(component_switch)
     _LOGGER.debug("Created component enable switch")

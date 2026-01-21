@@ -27,6 +27,8 @@ except ImportError:
     ConfigEntry = None
     DeviceInfo = None
 
+from .storage import get_storage
+
 _LOGGER = logging.getLogger("don_controller")
 
 
@@ -69,7 +71,8 @@ class ZoneAreaNumber(MultiTRVHeatingNumber):
     """
     
     def __init__(self, zone_name: str, zone_entity_id: str, zone,
-                 entry_id: Optional[str] = None, device_info: Optional[Any] = None) -> None:
+                 entry_id: Optional[str] = None, device_info: Optional[Any] = None,
+                 hass: Optional[Any] = None) -> None:
         """
         Initialize zone area number entity.
         
@@ -79,6 +82,7 @@ class ZoneAreaNumber(MultiTRVHeatingNumber):
             zone: ZoneWrapper instance
             entry_id: Config entry ID for prefixing unique IDs
             device_info: Device info dict for grouping
+            hass: Home Assistant instance for state restoration
         """
         name = f"{zone_name} Floor Area"
         zone_name_lower = zone_name.lower().replace(" ", "_")
@@ -104,7 +108,23 @@ class ZoneAreaNumber(MultiTRVHeatingNumber):
         )
         self.zone = zone
         self.zone_entity_id = zone_entity_id
-        self._attr_native_value = zone.floor_area_m2 if zone else 0.0
+        self.hass = hass
+        
+        # Restore state from storage if available
+        storage = get_storage()
+        if storage:
+            stored_value = storage.get(f"zone_floor_area_{prefixed_id}")
+            if stored_value is not None:
+                try:
+                    self.zone.floor_area_m2 = max(0.0, min(500.0, float(stored_value)))
+                    self._attr_native_value = self.zone.floor_area_m2
+                    _LOGGER.info("Restored zone %s floor area from storage: %.2f m²", zone_name, self.zone.floor_area_m2)
+                except (ValueError, TypeError):
+                    self._attr_native_value = zone.floor_area_m2 if zone else 0.0
+            else:
+                self._attr_native_value = zone.floor_area_m2 if zone else 0.0
+        else:
+            self._attr_native_value = zone.floor_area_m2 if zone else 0.0
     
     @property
     def native_value(self) -> Optional[float]:
@@ -115,7 +135,12 @@ class ZoneAreaNumber(MultiTRVHeatingNumber):
         """Set floor area value."""
         if self.zone:
             self.zone.floor_area_m2 = max(0.0, min(500.0, value))
+            self._attr_native_value = self.zone.floor_area_m2
             self.async_write_ha_state()
+            # Persist state to storage
+            storage = get_storage()
+            if storage:
+                await storage.async_set_and_save(f"zone_floor_area_{self._attr_unique_id}", self.zone.floor_area_m2)
             _LOGGER.info("Set zone %s floor area to %.2f m²", self.zone.name, self.zone.floor_area_m2)
 
 
@@ -127,7 +152,8 @@ class PreheatingEndTimeHour(MultiTRVHeatingNumber):
     """
     
     def __init__(self, controller, entry_id: Optional[str] = None,
-                 controller_device_info: Optional[Any] = None) -> None:
+                 controller_device_info: Optional[Any] = None,
+                 hass: Optional[Any] = None) -> None:
         """
         Initialize preheating hour number entity.
         
@@ -135,6 +161,7 @@ class PreheatingEndTimeHour(MultiTRVHeatingNumber):
             controller: MasterController instance
             entry_id: Config entry ID for prefixing unique IDs
             controller_device_info: Device info dict for grouping with controller metrics
+            hass: Home Assistant instance for state restoration
         """
         name = "Preheating End Hour"
         unique_id = "multi_trv_preheating_end_hour"
@@ -156,10 +183,30 @@ class PreheatingEndTimeHour(MultiTRVHeatingNumber):
             device_info=controller_device_info
         )
         self.controller = controller
+        self.hass = hass
         
-        # Initialize with current hour
+        # Initialize with current hour, but restore from storage if available
         now = datetime.now()
-        self._attr_native_value = float(now.hour)
+        storage = get_storage()
+        if storage:
+            stored_hour = storage.get(f"preheating_end_hour_{prefixed_id}")
+            if stored_hour is not None:
+                try:
+                    hour = int(float(stored_hour))
+                    # Restore the preheating end time with this hour
+                    minute = self.controller.preheating.preheating_end_time.minute if self.controller.preheating.preheating_end_time else 0
+                    new_end_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    if new_end_time <= now:
+                        new_end_time += timedelta(days=1)
+                    self.controller.preheating.preheating_end_time = new_end_time
+                    self._attr_native_value = float(hour)
+                    _LOGGER.info("Restored preheating end hour from storage: %d", hour)
+                except (ValueError, AttributeError):
+                    self._attr_native_value = float(now.hour)
+            else:
+                self._attr_native_value = float(now.hour)
+        else:
+            self._attr_native_value = float(now.hour)
     
     @property
     def native_value(self) -> Optional[float]:
@@ -187,7 +234,12 @@ class PreheatingEndTimeHour(MultiTRVHeatingNumber):
             new_end_time += timedelta(days=1)
         
         self.controller.preheating.preheating_end_time = new_end_time
+        self._attr_native_value = float(hour)
         self.async_write_ha_state()
+        # Persist state to storage
+        storage = get_storage()
+        if storage:
+            await storage.async_set_and_save(f"preheating_end_hour_{self._attr_unique_id}", hour)
         _LOGGER.info("Set preheating end time to %02d:%02d", hour, minute)
 
 
@@ -199,7 +251,8 @@ class PreheatingEndTimeMinute(MultiTRVHeatingNumber):
     """
     
     def __init__(self, controller, entry_id: Optional[str] = None,
-                 controller_device_info: Optional[Any] = None) -> None:
+                 controller_device_info: Optional[Any] = None,
+                 hass: Optional[Any] = None) -> None:
         """
         Initialize preheating minute number entity.
         
@@ -207,6 +260,7 @@ class PreheatingEndTimeMinute(MultiTRVHeatingNumber):
             controller: MasterController instance
             entry_id: Config entry ID for prefixing unique IDs
             controller_device_info: Device info dict for grouping with controller metrics
+            hass: Home Assistant instance for state restoration
         """
         name = "Preheating End Minute"
         unique_id = "multi_trv_preheating_end_minute"
@@ -228,10 +282,30 @@ class PreheatingEndTimeMinute(MultiTRVHeatingNumber):
             device_info=controller_device_info
         )
         self.controller = controller
+        self.hass = hass
         
-        # Initialize with current minute
+        # Initialize with current minute, but restore from storage if available
         now = datetime.now()
-        self._attr_native_value = float(now.minute)
+        storage = get_storage()
+        if storage:
+            stored_minute = storage.get(f"preheating_end_minute_{prefixed_id}")
+            if stored_minute is not None:
+                try:
+                    minute = int(float(stored_minute))
+                    # Restore the preheating end time with this minute
+                    hour = self.controller.preheating.preheating_end_time.hour if self.controller.preheating.preheating_end_time else datetime.now().hour
+                    new_end_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    if new_end_time <= now:
+                        new_end_time += timedelta(days=1)
+                    self.controller.preheating.preheating_end_time = new_end_time
+                    self._attr_native_value = float(minute)
+                    _LOGGER.info("Restored preheating end minute from storage: %d", minute)
+                except (ValueError, AttributeError):
+                    self._attr_native_value = float(now.minute)
+            else:
+                self._attr_native_value = float(now.minute)
+        else:
+            self._attr_native_value = float(now.minute)
     
     @property
     def native_value(self) -> Optional[float]:
@@ -259,7 +333,12 @@ class PreheatingEndTimeMinute(MultiTRVHeatingNumber):
             new_end_time += timedelta(days=1)
         
         self.controller.preheating.preheating_end_time = new_end_time
+        self._attr_native_value = float(minute)
         self.async_write_ha_state()
+        # Persist state to storage
+        storage = get_storage()
+        if storage:
+            await storage.async_set_and_save(f"preheating_end_minute_{self._attr_unique_id}", minute)
         _LOGGER.info("Set preheating end time to %02d:%02d", hour, minute)
 
 
@@ -298,8 +377,8 @@ async def async_setup_entry(
         )
     
     # Create preheating time control entities (not zone-specific, global controller)
-    preheating_hour = PreheatingEndTimeHour(controller, entry.entry_id, controller_device_info)
-    preheating_minute = PreheatingEndTimeMinute(controller, entry.entry_id, controller_device_info)
+    preheating_hour = PreheatingEndTimeHour(controller, entry.entry_id, controller_device_info, hass)
+    preheating_minute = PreheatingEndTimeMinute(controller, entry.entry_id, controller_device_info, hass)
     numbers.append(preheating_hour)
     numbers.append(preheating_minute)
     _LOGGER.debug("Created preheating time control entities")
@@ -322,7 +401,8 @@ async def async_setup_entry(
             zone_entity_id,
             zone,
             entry.entry_id,
-            device_info
+            device_info,
+            hass
         )
         numbers.append(number)
         _LOGGER.debug("Created area number for zone: %s", zone.name)

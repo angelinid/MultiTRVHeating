@@ -21,6 +21,8 @@ except ImportError:
     AddEntitiesCallback = None
     ConfigEntry = None
 
+from .storage import get_storage
+
 _LOGGER = logging.getLogger("don_controller")
 
 
@@ -69,7 +71,7 @@ class DischargeTRVSelect(MultiTRVHeatingSelect):
     """
     
     def __init__(self, controller, entry_id: Optional[str] = None,
-                 device_info: Optional[Any] = None) -> None:
+                 device_info: Optional[Any] = None, hass: Optional[Any] = None) -> None:
         """
         Initialize the discharge TRV selector.
         
@@ -77,6 +79,7 @@ class DischargeTRVSelect(MultiTRVHeatingSelect):
             controller: MasterController instance
             entry_id: Config entry ID for prefixing unique IDs
             device_info: Device info dict for controller device
+            hass: Home Assistant instance for state restoration
         """
         # Create unique ID
         if entry_id:
@@ -92,11 +95,32 @@ class DischargeTRVSelect(MultiTRVHeatingSelect):
         )
         
         self.controller = controller
+        self.hass = hass
         self._attr_has_entity_name = True
         self._update_options()
         
-        # Set current option based on controller's pump discharge config
-        self._update_current_option()
+        # Restore state from storage if available
+        storage = get_storage()
+        if storage:
+            stored_option = storage.get(f"discharge_trv_select_{unique_id}")
+            if stored_option and stored_option in self._attr_options:
+                self._attr_current_option = stored_option
+                # Update controller to match restored state
+                if stored_option == "Off":
+                    self.controller.pump_discharge.update_config(None, None)
+                else:
+                    # Find zone with this name and update config
+                    for zone in self.controller.zones.values():
+                        if zone.name == stored_option:
+                            self.controller.pump_discharge.update_config(zone.entity_id, zone.name)
+                            break
+                _LOGGER.info("Restored discharge TRV selection from storage: %s", stored_option)
+            else:
+                # Set current option based on controller's pump discharge config
+                self._update_current_option()
+        else:
+            # Set current option based on controller's pump discharge config
+            self._update_current_option()
     
     def _update_options(self) -> None:
         """
@@ -165,6 +189,10 @@ class DischargeTRVSelect(MultiTRVHeatingSelect):
         
         # Trigger state change notification
         self.async_write_ha_state()
+        # Persist state to storage
+        storage = get_storage()
+        if storage:
+            await storage.async_set_and_save(f"discharge_trv_select_{self._attr_unique_id}", self._attr_current_option)
 
 
 class MultiTRVHeatingSelectManager:
@@ -176,7 +204,8 @@ class MultiTRVHeatingSelectManager:
     """
     
     def __init__(self, controller, entry_id: Optional[str] = None,
-                 controller_device: Optional[Any] = None) -> None:
+                 controller_device: Optional[Any] = None,
+                 hass: Optional[Any] = None) -> None:
         """
         Initialize the select entity manager.
         
@@ -184,10 +213,12 @@ class MultiTRVHeatingSelectManager:
             controller: MasterController instance
             entry_id: Config entry ID for prefixing unique IDs
             controller_device: DeviceInfo dict for controller device
+            hass: Home Assistant instance for state restoration
         """
         self.controller = controller
         self.entry_id = entry_id
         self.controller_device = controller_device
+        self.hass = hass
         self.select_entities = []
         self._create_entities()
     
@@ -197,7 +228,8 @@ class MultiTRVHeatingSelectManager:
         discharge_selector = DischargeTRVSelect(
             self.controller,
             self.entry_id,
-            self.controller_device
+            self.controller_device,
+            self.hass
         )
         self.select_entities.append(discharge_selector)
         _LOGGER.debug("Created discharge TRV selector entity")
@@ -247,7 +279,7 @@ async def async_setup_entry(
             model="System Controller",
         )
     
-    manager = MultiTRVHeatingSelectManager(controller, entry.entry_id, controller_device_info)
+    manager = MultiTRVHeatingSelectManager(controller, entry.entry_id, controller_device_info, hass)
     entities = manager.get_all_entities()
     
     async_add_entities(entities, update_before_add=True)
