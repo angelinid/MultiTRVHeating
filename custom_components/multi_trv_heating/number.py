@@ -342,6 +342,92 @@ class PreheatingEndTimeMinute(MultiTRVHeatingNumber):
         _LOGGER.info("Set preheating end time to %02d:%02d", hour, minute)
 
 
+class PreheatingTuningNumber(MultiTRVHeatingNumber):
+    """
+    Number entity for controlling preheating tuning constant.
+    
+    The tuning constant scales the flow temperature override during preheating.
+    Higher values = more aggressive preheating. Can be updated via UI or refined
+    through preheating cycle analysis.
+    
+    Formula: flow_override = thermal_load * time_pressure * tuning_constant
+    """
+    
+    def __init__(self, controller, entry_id: Optional[str] = None,
+                 controller_device_info: Optional[Any] = None,
+                 hass: Optional[Any] = None) -> None:
+        """
+        Initialize preheating tuning constant number entity.
+        
+        Args:
+            controller: MasterController instance
+            entry_id: Config entry ID for prefixing unique IDs
+            controller_device_info: Device info dict for grouping with controller metrics
+            hass: Home Assistant instance for state restoration
+        """
+        name = "Preheating Tuning Constant"
+        unique_id = "multi_trv_preheating_tuning_constant"
+        
+        if entry_id:
+            prefixed_id = f"{entry_id}_{unique_id}"
+        else:
+            prefixed_id = unique_id
+        
+        # Tuning constant range: 0.1-5.0, step 0.1
+        super().__init__(
+            name,
+            prefixed_id,
+            icon="mdi:tune",
+            unit=None,  # Dimensionless parameter
+            min_val=0.1,
+            max_val=5.0,
+            step=0.1,
+            device_info=controller_device_info
+        )
+        self.controller = controller
+        self.hass = hass
+        
+        # Restore state from storage if available
+        storage = get_storage()
+        if storage:
+            stored_value = storage.get(f"preheating_tuning_constant_{prefixed_id}")
+            if stored_value is not None:
+                try:
+                    value = float(stored_value)
+                    # Clamp to valid range
+                    value = max(0.1, min(5.0, value))
+                    self.controller.preheating.tuning_constant = value
+                    self._attr_native_value = value
+                    _LOGGER.info("Restored preheating tuning constant from storage: %.3f", value)
+                except (ValueError, TypeError):
+                    self._attr_native_value = self.controller.preheating.tuning_constant
+            else:
+                self._attr_native_value = self.controller.preheating.tuning_constant
+        else:
+            self._attr_native_value = self.controller.preheating.tuning_constant
+    
+    @property
+    def native_value(self) -> Optional[float]:
+        """Return current tuning constant."""
+        return round(self.controller.preheating.tuning_constant, 3)
+    
+    async def async_set_native_value(self, value: float) -> None:
+        """
+        Set preheating tuning constant.
+        
+        When set via UI, applies directly (alpha=1.0) for immediate effect.
+        """
+        # Direct update from UI (no filtering)
+        self.controller.preheating.tuning_constant = value
+        self._attr_native_value = round(self.controller.preheating.tuning_constant, 3)
+        self.async_write_ha_state()
+        # Persist state to storage
+        storage = get_storage()
+        if storage:
+            await storage.async_set_and_save(f"preheating_tuning_constant_{self._attr_unique_id}", self.controller.preheating.tuning_constant)
+        _LOGGER.info("Set preheating tuning constant to %.3f via UI", self.controller.preheating.tuning_constant)
+
+
 async def async_setup_entry(
     hass: "HomeAssistant",
     entry: "ConfigEntry",
@@ -379,9 +465,11 @@ async def async_setup_entry(
     # Create preheating time control entities (not zone-specific, global controller)
     preheating_hour = PreheatingEndTimeHour(controller, entry.entry_id, controller_device_info, hass)
     preheating_minute = PreheatingEndTimeMinute(controller, entry.entry_id, controller_device_info, hass)
+    preheating_tuning = PreheatingTuningNumber(controller, entry.entry_id, controller_device_info, hass)
     numbers.append(preheating_hour)
     numbers.append(preheating_minute)
-    _LOGGER.debug("Created preheating time control entities")
+    numbers.append(preheating_tuning)
+    _LOGGER.debug("Created preheating time control entities and tuning constant")
     
     # Create area number for each zone
     for zone_entity_id, zone in controller.zones.items():

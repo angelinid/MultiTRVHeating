@@ -24,7 +24,6 @@ SOFTWARE.
 
 import logging
 import asyncio
-from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 try:
@@ -58,11 +57,6 @@ MIN_FLOW_TEMP = 25.0
 
 # Flow temperature = 60°C is maximum boiler output (safety limit)
 MAX_FLOW_TEMP = 60.0
-
-# Temperature offset configuration constants
-MIN_TEMP_OFFSET = -5.0  # Minimum offset in degrees Celsius
-MAX_TEMP_OFFSET = 5.0   # Maximum offset in degrees Celsius
-
 
 class MasterController:
 

@@ -190,7 +190,15 @@ class PreheatingEnableSwitch(MultiTRVHeatingSwitch):
     
     @property
     def is_on(self) -> bool:
-        """Return True if switch is on."""
+        """
+        Return True if switch is on.
+        
+        Automatically syncs with controller.preheating.is_enabled to ensure
+        the switch state always reflects the actual preheating state.
+        """
+        if self.controller and self.controller.preheating:
+            # Always read from controller to ensure sync
+            return self.controller.preheating.is_enabled
         return self._is_on
     
     async def async_turn_on(self, **kwargs) -> None:

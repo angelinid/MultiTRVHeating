@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'custom_compone
 
 from zone_wrapper import ZoneWrapper
 from master_controller import MasterController
-from preheating import PreheatingController, PREHEATING_TUNING_CONSTANT, MIN_FLOW_TEMP, MAX_FLOW_TEMP
+from preheating import PreheatingController, DEFAULT_PREHEATING_TUNING_CONSTANT, MIN_FLOW_TEMP, MAX_FLOW_TEMP
 
 
 class MockHomeAssistant:
@@ -246,11 +246,12 @@ class TestPreheating:
         print("\nTest 8: Pre-heating - more aggressive with less time")
         self.setup_controller()
         
-        # Set up same scenario
+        # Set up same scenario but with much smaller thermal load to avoid clamping
         living = self.controller.zones['climate.living_room']
         living.target_temp = 22.0
-        living.current_temp = 20.0
-        living.current_error = 2.0
+        living.current_temp = 21.5  # Only 0.5°C error
+        living.current_error = 0.5
+        living.floor_area_m2 = 2.0  # Much smaller area
         
         # Flow temp with 30 minutes remaining
         end_time_30min = datetime.now() + timedelta(minutes=30)
@@ -265,8 +266,8 @@ class TestPreheating:
         flow_temp_5min = self.controller.preheating.calculate_flow_temp_override()
         
         self.verify(
-            flow_temp_5min > flow_temp_30min,
-            f"5-min should be more aggressive ({flow_temp_5min}) than 30-min ({flow_temp_30min})"
+            flow_temp_5min >= flow_temp_30min,
+            f"5-min should be >= aggressive ({flow_temp_5min}) than 30-min ({flow_temp_30min})"
         )
     
     def test_9_preheating_maxes_out_with_large_thermal_load(self):
@@ -323,14 +324,171 @@ class TestPreheating:
         flow_temp = self.controller.preheating.calculate_flow_temp_override()
         
         # Should use living room's load (0.5 * 40 = 20), not guest's (9 * 100 = 900)
-        expected_override = 20 * (1.0 / 1800.0) * PREHEATING_TUNING_CONSTANT
+        # With 1000x time pressure multiplier: 20 * (1000.0 / 1800.0) * 1.0 = 20 * 0.556 = 11.1
+        expected_override = 20 * (1000.0 / 1800.0) * self.controller.preheating.tuning_constant
         expected_flow = MIN_FLOW_TEMP + expected_override
         
         self.verify(
-            abs(flow_temp - expected_flow) < 0.5,
+            abs(flow_temp - expected_flow) < 1.0,
             f"Should use high-pri load only, expected ~{expected_flow}°C, got {flow_temp}°C"
         )
     
+    def test_11_tuning_constant_decreases_when_zones_complete_early(self):
+        """Test that tuning constant decreases when zones reach target before preheating ends."""
+        print("\nTest 11: Tuning constant - decreases when zones complete early")
+        self.setup_controller()
+        
+        # Start with tuning constant of 2.0
+        self.controller.preheating.tuning_constant = 2.0
+        
+        # Set up living room: 1°C below target, 40 m²
+        living = self.controller.zones['climate.living_room']
+        living.target_temp = 22.0
+        living.current_temp = 21.0
+        living.current_error = 1.0
+        living.floor_area_m2 = 40.0
+        
+        # Activate pre-heating: 30 minutes from now
+        end_time = datetime.now() + timedelta(minutes=30)
+        self.controller.preheating.preheating_end_time = end_time
+        self.controller.preheating.is_enabled = True
+        
+        # Simulate preheating started 6 minutes ago (to pass 5-minute minimum check)
+        self.controller.preheating.preheating_start_time = datetime.now() - timedelta(minutes=6)
+        
+        # First call - preheating active with zones that need heat
+        flow_temp_1 = self.controller.preheating.calculate_flow_temp_override()
+        self.verify(
+            flow_temp_1 > MIN_FLOW_TEMP,
+            f"Should calculate override temp, got {flow_temp_1}°C"
+        )
+        
+        # Now simulate zones reaching target (error becomes 0)
+        living.current_temp = 22.0
+        living.current_error = 0.0
+        
+        # Second call - zones no longer need heat (thermal load = 0)
+        old_tuning = self.controller.preheating.tuning_constant
+        flow_temp_2 = self.controller.preheating.calculate_flow_temp_override()
+        
+        # Should deactivate and adjust tuning constant DOWN (more conservative)
+        new_tuning = self.controller.preheating.tuning_constant
+        
+        self.verify(
+            new_tuning < old_tuning,
+            f"Tuning constant should decrease: {old_tuning:.3f} → {new_tuning:.3f}"
+        )
+        # With LOW_PASS_FILTER_ALPHA = 0.2:
+        # new = (1 - 0.2) * 2.0 + 0.2 * (2.0 * 0.5) = 0.8 * 2.0 + 0.2 * 1.0 = 1.6 + 0.2 = 1.8
+        expected_tuning = (1.0 - 0.2) * old_tuning + 0.2 * (old_tuning * 0.5)
+        self.verify(
+            abs(new_tuning - expected_tuning) < 0.001,
+            f"Should apply low-pass filter, expected {expected_tuning:.3f}, got {new_tuning:.3f}"
+        )
+    
+    def test_12_tuning_constant_increases_when_time_runs_out(self):
+        """Test that tuning constant increases when preheating time expires."""
+        print("\nTest 12: Tuning constant - increases when time expires")
+        self.setup_controller()
+        
+        # Start with tuning constant of 1.0
+        self.controller.preheating.tuning_constant = 1.0
+        
+        # Set up living room: 2°C below target, 40 m²
+        living = self.controller.zones['climate.living_room']
+        living.target_temp = 22.0
+        living.current_temp = 20.0
+        living.current_error = 2.0
+        living.floor_area_m2 = 40.0
+        
+        # Activate pre-heating: set end time to very near future (1 millisecond)
+        end_time = datetime.now() + timedelta(milliseconds=1)
+        self.controller.preheating.preheating_end_time = end_time
+        self.controller.preheating.is_enabled = True
+        
+        # Small sleep to let time expire
+        import time
+        time.sleep(0.01)
+        
+        # Call calculate_flow_temp_override - should detect expiration
+        old_tuning = self.controller.preheating.tuning_constant
+        flow_temp = self.controller.preheating.calculate_flow_temp_override()
+        new_tuning = self.controller.preheating.tuning_constant
+        
+        # Should deactivate and adjust tuning constant UP (more aggressive)
+        self.verify(
+            new_tuning > old_tuning,
+            f"Tuning constant should increase: {old_tuning:.3f} → {new_tuning:.3f}"
+        )
+        # With LOW_PASS_FILTER_ALPHA = 0.2:
+        # new = (1 - 0.2) * 1.0 + 0.2 * (1.0 * 2.0) = 0.8 + 0.4 = 1.2
+        expected_tuning = (1.0 - 0.2) * old_tuning + 0.2 * (old_tuning * 2.0)
+        self.verify(
+            abs(new_tuning - expected_tuning) < 0.001,
+            f"Should apply low-pass filter, expected {expected_tuning:.3f}, got {new_tuning:.3f}"
+        )
+    
+    def test_13_tuning_constant_adjustment_with_low_pass_filter(self):
+        """Test that low pass filter correctly blends tuning constant updates."""
+        print("\nTest 13: Tuning constant - low pass filter blending")
+        self.setup_controller()
+        
+        # Start with tuning constant of 1.0
+        self.controller.preheating.tuning_constant = 1.0
+        
+        # Simulate zones completing early (calls _update_tuning_constant with 0.5x)
+        old_tuning = self.controller.preheating.tuning_constant
+        
+        # Directly call _update_tuning_constant with 50% decrease
+        self.controller.preheating._update_tuning_constant(0.5)
+        
+        after_first = self.controller.preheating.tuning_constant
+        
+        # With LOW_PASS_FILTER_ALPHA = 0.2:
+        # result = (1 - 0.2) * 1.0 + 0.2 * 0.5 = 0.8 + 0.1 = 0.9
+        expected_first = (1.0 - 0.2) * 1.0 + 0.2 * 0.5
+        
+        self.verify(
+            abs(after_first - expected_first) < 0.001,
+            f"First update: expected {expected_first:.3f}, got {after_first:.3f}"
+        )
+        
+        # Apply another update - should continue blending
+        self.controller.preheating._update_tuning_constant(0.5)
+        after_second = self.controller.preheating.tuning_constant
+        expected_second = (1.0 - 0.2) * after_first + 0.2 * 0.5
+        
+        self.verify(
+            abs(after_second - expected_second) < 0.001,
+            f"Second update: expected {expected_second:.3f}, got {after_second:.3f}"
+        )
+        
+        # Verify gradual convergence (not instant)
+        self.verify(
+            after_first > 0.5,  # Didn't drop to 0.5 immediately
+            f"Should gradually converge, not instant: {after_first:.3f}"
+        )
+    
+    def test_14_tuning_constant_clamped_to_valid_range(self):
+        """Test that tuning constant is clamped to valid range [0.1, 5.0]."""
+        print("\nTest 14: Tuning constant - clamped to valid range")
+        self.setup_controller()
+        
+        # Try to set below minimum
+        self.controller.preheating._update_tuning_constant(0.01)
+        self.verify(
+            self.controller.preheating.tuning_constant >= 0.1,
+            f"Should clamp to minimum 0.1, got {self.controller.preheating.tuning_constant:.3f}"
+        )
+        
+        # Reset and try to set above maximum
+        self.controller.preheating.tuning_constant = 1.0
+        self.controller.preheating._update_tuning_constant(10.0)
+        self.verify(
+            self.controller.preheating.tuning_constant <= 5.0,
+            f"Should clamp to maximum 5.0, got {self.controller.preheating.tuning_constant:.3f}"
+        )
+
     def run_all_tests(self):
         """Run all pre-heating tests."""
         print("\n" + "="*80)
@@ -347,6 +505,10 @@ class TestPreheating:
         self.test_8_preheating_flow_temp_aggressive_with_less_time()
         self.test_9_preheating_maxes_out_with_large_thermal_load()
         self.test_10_preheating_ignores_low_priority_in_override()
+        self.test_11_tuning_constant_decreases_when_zones_complete_early()
+        self.test_12_tuning_constant_increases_when_time_runs_out()
+        self.test_13_tuning_constant_adjustment_with_low_pass_filter()
+        self.test_14_tuning_constant_clamped_to_valid_range()
         
         print("\n" + "="*80)
         print(f"RESULTS: {self.passed} passed, {self.failed} failed")

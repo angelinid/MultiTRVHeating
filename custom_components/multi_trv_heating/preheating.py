@@ -35,19 +35,20 @@ _LOGGER = logging.getLogger("don_controller")
 # Pre-heating Control Constants
 # =========================================================
 
-# Flow temperature = 5°C is boiler OFF signal (minimum safe temperature)
-MIN_FLOW_TEMP = 5.0
+# Flow temperature = 25°C is minimum when boiler is ON
+MIN_FLOW_TEMP = 25.0
 
-# Flow temperature = 80°C is maximum boiler output (safety limit)
-MAX_FLOW_TEMP = 80.0
+# Flow temperature = 60°C is maximum boiler output (safety limit)
+MAX_FLOW_TEMP = 60.0
 
-# Pre-heating tuning constant: scales thermal load to flow temperature override
+# Default pre-heating tuning constant (can be overridden via tuning_constant attribute)
 # thermal_load = max(temp_error * floor_area) for all high-priority zones
 # time_pressure = 1.0 / time_remaining_seconds
-# flow_override = MIN_FLOW_TEMP + (thermal_load * time_pressure * PREHEATING_TUNING_CONSTANT)
+# flow_override = thermal_load * time_pressure * tuning_constant
 # Tune this based on system response (larger = more aggressive preheating)
-PREHEATING_TUNING_CONSTANT = 1.0  # Can be tuned empirically
+DEFAULT_PREHEATING_TUNING_CONSTANT = 1.0
 
+LOW_PASS_FILTER_ALPHA = 0.2  # Default alpha for tuning constant updates
 
 class PreheatingController:
     """
@@ -74,8 +75,65 @@ class PreheatingController:
         # Current pre-heating end time (None = not preheating)
         self.preheating_end_time: Optional[datetime] = None
 
+        self.preheating_start_time = None
+
         # Initialise it as disabled
         self.is_enabled: bool = False
+        
+        # Tuning constant for preheating flow temperature calculation
+        # Can be adjusted via UI or refined through preheating cycles
+        self.tuning_constant: float = DEFAULT_PREHEATING_TUNING_CONSTANT
+
+    def _preheating_disabled(self, tuning_adj: float) -> None:
+        """
+        Disable pre-heating mode and adjust tuning constant based on exit reason.
+        
+        This method cleanly terminates a preheating cycle and applies a tuning
+        constant adjustment to help the system learn from the cycle's outcome.
+        
+        Args:
+            tuning_adj: Tuning adjustment factor
+                - 0.5: Zones completed early (too slow, need conservative adjustment)
+                - 1.0: Normal exit without learning
+                - 2.0: Time expired (too aggressive, need faster next time)
+        
+        Returns:
+            None
+        """
+        self.preheating_end_time = None
+        self.preheating_start_time = None
+        self.is_enabled = False
+        _LOGGER.info("Pre-heating mode disabled with tuning adjustment factor: %.1f", tuning_adj)
+        # Apply tuning adjustment based on exit reason
+        self._update_tuning_constant(self.tuning_constant * tuning_adj)
+    
+    def _update_tuning_constant(self, new_value: float) -> None:
+        """
+        Update tuning constant using a low pass filter.
+        
+        Applies exponential smoothing to gradually blend new refinements into the
+        existing tuning constant. This prevents abrupt changes from measurement noise
+        or single-cycle anomalies.
+        
+        Low Pass Filter Formula:
+        tuning_constant = (1 - alpha) * tuning_constant + alpha * new_value
+        
+        Args:
+            new_value: New tuning constant value from refinement or UI
+        """
+        
+        # Clamp new_value to valid range (0.1 to 5.0)
+        clamped_value = max(0.1, min(5.0, new_value))
+
+        new_tuning_constant = (1.0 - LOW_PASS_FILTER_ALPHA) * self.tuning_constant + LOW_PASS_FILTER_ALPHA * clamped_value
+
+        _LOGGER.info(
+            "Updated tuning constant using low pass filter: old=%.3f, new=%.3f, result=%.3f",
+            self.tuning_constant, new_tuning_constant, clamped_value
+        )
+        
+        # Apply low pass filter
+        self.tuning_constant = new_tuning_constant
     
     def is_active(self) -> bool:
         """
@@ -139,36 +197,47 @@ class PreheatingController:
         Returns:
             float: Calculated flow temperature override for pre-heating (°C)
         """
-        if not self.is_active():
-            return 0.0  # Not preheating
-        
+        if self.preheating_end_time is None or self.is_enabled is False:
+            _LOGGER.warning("Pre-heating main function called but pre-heating is disabled")
+            self._preheating_disabled(1)
+            return 0.0
+
         now = datetime.now()
         time_remaining_seconds = (self.preheating_end_time - now).total_seconds()
-        
+        if self.preheating_start_time is None:
+            self.preheating_start_time = datetime.now()
+
         # Failsafe: if time is already past, return 0 to fall back to normal logic
         if time_remaining_seconds <= 0:
             _LOGGER.warning("Pre-heating time has expired, falling back to normal control")
-            self.preheating_end_time = None  # Deactivate pre-heating
+            # Need quicker adjustment next time
+            self._preheating_disabled(2)
             return 0.0
         
         # Get max thermal load from high-priority zones
         max_thermal_load = self._get_max_high_priority_thermal_load()
+
+        if (now - self.preheating_start_time).total_seconds() / 60.0 > 5 and max_thermal_load <= 0:
+            _LOGGER.debug("No high-priority zones need heating, pre-heating complete")
+            # Need slower adjustment next time
+            self._preheating_disabled(0.5)
+            return 0.0
         
         # Calculate time pressure (increases as time runs out)
-        time_pressure = 1.0 / time_remaining_seconds
+        time_pressure = 1000.0 / time_remaining_seconds
         
         # Calculate override using parametric formula
-        # flow_override = thermal_load * time_pressure * TUNING_CONSTANT
-        flow_override = max_thermal_load * time_pressure * PREHEATING_TUNING_CONSTANT
+        # flow_override = thermal_load * time_pressure * tuning_constant
+        flow_override = max_thermal_load * time_pressure * self.tuning_constant
         
         # Calculate final flow temperature
         preheating_flow_temp = MIN_FLOW_TEMP + flow_override
         
         _LOGGER.debug(
             "Pre-heating calculation: thermal_load=%.1f, time_remaining=%.0f s, "
-            "time_pressure=%.6f, override=%.1f°C, final_flow_temp=%.1f°C",
+            "time_pressure=%.6f, tuning_constant=%.3f, override=%.1f°C, final_flow_temp=%.1f°C",
             max_thermal_load, time_remaining_seconds, time_pressure,
-            flow_override, preheating_flow_temp
+            self.tuning_constant, flow_override, preheating_flow_temp
         )
         
         # Clamp to valid range
