@@ -22,28 +22,23 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-import logging
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import callback
 from homeassistant.helpers import selector
 
-_LOGGER = logging.getLogger(__name__)
-
-# Component domain - must match DOMAIN in __init__.py
-DOMAIN = "multi_trv_heating"
-
-# Configuration keys
-CONF_ENTITY_ID = "entity_id"                              # Climate entity to control
-CONF_NAME = "name"                                        # Zone name
-CONF_AREA = "area"                                        # Zone floor area in m²
-CONF_PRIORITY = "is_high_priority"                        # Zone priority (boolean: True=high, False=low)
-CONF_TRV_POSITION_ENTITY_ID = "trv_position_entity_id"    # TRV position sensor entity
-CONF_TEMP_CALIBRATION_ENTITY_ID = "temp_calib_entity_id"  # Temperature calibration (offset) number entity
-CONF_EXT_TEMP_ENTITY_ID = "ext_temp_entity_id"            # Optional external temperature entity
-CONF_DISCHARGE_TRV_ENTITY_ID = "discharge_trv_entity_id"  # Pump discharge TRV entity ID
-CONF_DISCHARGE_TRV_NAME = "discharge_trv_name"            # Pump discharge TRV friendly name
+from .const import (
+    CONF_AREA,
+    CONF_DISCHARGE_TRV_ENTITY_ID,
+    CONF_DISCHARGE_TRV_NAME,
+    CONF_ENTITY_ID,
+    CONF_EXT_TEMP_ENTITY_ID,
+    CONF_NAME,
+    CONF_PRIORITY,
+    CONF_TEMP_CALIBRATION_ENTITY_ID,
+    CONF_TRV_POSITION_ENTITY_ID,
+    DOMAIN,
+)
 
 # Define the data schema for the zone configuration
 # This defines the structure of data for each zone
@@ -88,9 +83,7 @@ class OpenThermConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     2. Setting zone properties:
        - Zone name (optional, defaults to entity name)
        - Floor area in m² (optional, for demand calculation)
-       - Priority level: 0.0-1.0 (optional, defaults to 1.0)
-         * > 0.5: High priority (triggers at 25% opening)
-         * <= 0.5: Low priority (needs 100% or aggregates)
+       - Priority: high (default) or low (needs 100% opening or aggregates)
        - External temperature sensor (optional, for better readings)
     3. Adding multiple zones iteratively
     4. Finalizing configuration

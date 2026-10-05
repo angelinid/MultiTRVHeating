@@ -22,47 +22,44 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 
-# __init__.py (Modern Component Entry Point)
+"""Multi-TRV Heating integration entry point."""
+
+import json
+import logging
+from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+
+from .const import DOMAIN, LOGGER_NAME, PLATFORMS
 from .master_controller import MasterController
 from .storage import StateStorage, set_storage
 
-DOMAIN = "multi_trv_heating"
+_LOGGER = logging.getLogger(LOGGER_NAME)
+
+VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text())["version"]
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up MasterController from a config entry (UI setup)."""
-    
-    # 1. Initialize state storage
+    """Set up the controller from a config entry and forward to the entity platforms."""
+    # Warning level on purpose: visible with HA's default log config, so deploys can be verified
+    _LOGGER.warning("Multi-TRV Heating v%s starting", VERSION)
     storage = StateStorage(hass)
     await storage.async_load()
     set_storage(storage)
-    
-    # 2. Load configuration from the UI entry
-    zone_configs = entry.data.get("zones", [])
-    
-    # 3. Instantiate and store the controller
-    controller = MasterController(hass, zone_configs)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = controller
-    
-    # 4. Start listening to events
-    await controller.async_start_listening()
-    
-    # 5. Set up sensor, switch, number, and select platforms to expose controller and zone state
-    # Home Assistant will automatically discover and call async_setup_entry in sensor.py, switch.py, number.py, select.py
-    # Entities will create their own DeviceInfo and group automatically by matching identifiers
-    await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "switch", "number", "select"])
 
+    controller = MasterController(hass, entry.data.get("zones", []))
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = controller
+
+    await controller.async_start_listening()
+
+    # Entities group themselves into devices via matching DeviceInfo identifiers.
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Handle removal of a config entry."""
-    # Unload sensor, switch, number, and select platforms
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor", "switch", "number", "select"])
-    
-    # Clean up controller and listeners
-    if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-        del hass.data[DOMAIN][entry.entry_id]
-    
+    """Unload the entity platforms and drop the controller."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     return unload_ok

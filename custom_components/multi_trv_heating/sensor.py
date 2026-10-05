@@ -6,16 +6,14 @@ visualization and monitoring in the UI.
 """
 
 import logging
-from typing import Optional, Any
+from typing import Any, Optional
 
 try:
-    from homeassistant.components.sensor import SensorEntity, SensorStateClass
+    from homeassistant.components.sensor import SensorEntity
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.const import UnitOfTemperature, PERCENTAGE
-    from homeassistant.core import HomeAssistant, callback
+    from homeassistant.core import HomeAssistant
     from homeassistant.helpers.entity_platform import AddEntitiesCallback
-    from homeassistant.helpers.typing import ConfigType
-    from homeassistant.helpers.device_registry import DeviceInfo
     # Convert enum to string value
     _UNIT_TEMP = UnitOfTemperature.CELSIUS if hasattr(UnitOfTemperature, 'CELSIUS') else "°C"
     if hasattr(_UNIT_TEMP, 'value'):
@@ -24,19 +22,23 @@ try:
 except ImportError:
     # For testing without Home Assistant
     SensorEntity = object
-    SensorStateClass = None
-    DeviceInfo = None
     _UNIT_TEMP = "°C"
     _UNIT_PERCENT = "%"
     HomeAssistant = None
     AddEntitiesCallback = None
-    ConfigType = None
     ConfigEntry = None
 
-_LOGGER = logging.getLogger("don_controller")
+try:
+    from .const import LOGGER_NAME
+    from .entity import controller_device_info, get_controller, prefixed_unique_id, zone_device_info, zone_slug
+except ImportError:
+    from const import LOGGER_NAME
+    from entity import controller_device_info, get_controller, prefixed_unique_id, zone_device_info, zone_slug
+
+_LOGGER = logging.getLogger(LOGGER_NAME)
 
 
-class MultiTRVHeatingSensor(SensorEntity if SensorEntity != object else object):
+class MultiTRVHeatingSensor(SensorEntity):
     """
     Base sensor class for MultiTRVHeating entities.
     
@@ -94,11 +96,7 @@ class ControllerSensor(MultiTRVHeatingSensor):
             entry_id: Config entry ID for prefixing unique IDs
             device_info: Device info dict for grouping entities
         """
-        # Prefix unique_id with entry_id and multi_trv for better organization
-        if entry_id:
-            prefixed_id = f"{entry_id}_multi_trv_{unique_id}"
-        else:
-            prefixed_id = f"multi_trv_{unique_id}"
+        prefixed_id = prefixed_unique_id(entry_id, f"multi_trv_{unique_id}")
         
         super().__init__(name, prefixed_id, unit, state_class, icon, device_info)
         self.metric_key = metric_key
@@ -111,9 +109,7 @@ class ControllerSensor(MultiTRVHeatingSensor):
             return None
         
         state = self.controller.get_controller_state()
-        if state and self.metric_key in state:
-            return state[self.metric_key]
-        return None
+        return state.get(self.metric_key) if state else None
 
 
 class ZoneSensor(MultiTRVHeatingSensor):
@@ -139,14 +135,7 @@ class ZoneSensor(MultiTRVHeatingSensor):
             device_info: Device info dict for grouping entities
         """
         name = f"{zone_name} {metric_name}"
-        zone_name_lower = zone_name.lower().replace(" ", "_")
-        unique_id = f"multi_trv_{zone_name_lower}_{metric_key}"
-        
-        # Prefix unique_id with entry_id for better organization
-        if entry_id:
-            prefixed_id = f"{entry_id}_{unique_id}"
-        else:
-            prefixed_id = unique_id
+        prefixed_id = prefixed_unique_id(entry_id, f"multi_trv_{zone_slug(zone_name)}_{metric_key}")
         
         super().__init__(name, prefixed_id, unit, state_class, icon, device_info)
         self.zone_name = zone_name
@@ -160,9 +149,7 @@ class ZoneSensor(MultiTRVHeatingSensor):
             return None
         
         state = self.zone.export_zone_state()
-        if state and self.metric_key in state:
-            return state[self.metric_key]
-        return None
+        return state.get(self.metric_key) if state else None
 
 
 class MultiTRVHeatingEntityManager:
@@ -220,7 +207,6 @@ class MultiTRVHeatingEntityManager:
                                     self.controller_device)
             sensor.controller = self.controller
             self.controller_sensors.append(sensor)
-            _LOGGER.debug("Created controller sensor: %s", name)
         
         # Create zone sensors
         for zone_entity_id, zone in self.controller.zones.items():
@@ -233,7 +219,6 @@ class MultiTRVHeatingEntityManager:
                                   self.entry_id, device_info)
                 sensor.zone = zone
                 zone_sensors.append(sensor)
-                _LOGGER.debug("Created zone sensor: %s - %s", zone.name, metric_name)
             
             self.zone_sensors[zone_entity_id] = zone_sensors
     
@@ -271,53 +256,19 @@ async def async_setup_entry(
     entry: "ConfigEntry",
     async_add_entities: "AddEntitiesCallback",
 ) -> None:
-    """
-    Set up MultiTRVHeating sensors from config entry.
-    
-    This is called by Home Assistant when the integration is loaded.
-    It creates all sensor entities and adds them to the UI.
-    
-    Args:
-        hass: Home Assistant instance
-        entry: Config entry for this integration
-        async_add_entities: Callback to add entities
-    """
-    from . import DOMAIN
-    
-    # Get the controller instance from the entry data
-    if entry.entry_id not in hass.data.get(DOMAIN, {}):
-        _LOGGER.error("No controller found for entry %s", entry.entry_id)
+    """Create controller and per-zone sensors for a config entry."""
+    controller = get_controller(hass, entry)
+    if controller is None:
         return
-    
-    controller = hass.data[DOMAIN][entry.entry_id]
-    
-    # Create controller device for controller-level metrics (zone count, flow temp, preheating)
-    controller_device_info = None
-    if DeviceInfo is not None:  # Only if running with Home Assistant
-        controller_device_info = DeviceInfo(
-            identifiers={("multi_trv_heating", f"{entry.entry_id}_controller")},
-            name="Multi-TRV Heating Controller",
-            manufacturer="Multi-TRV Heating",
-            model="System Controller",
-        )
-    
-    # Create device info dicts for each zone based on zone name
-    # Entities with matching identifiers will group under the same device
-    zone_device_infos = {}
-    if DeviceInfo is not None:  # Only if running with Home Assistant
-        for zone_entity_id, zone in controller.zones.items():
-            zone_name_slug = zone.name.lower().replace(" ", "_").replace("-", "_")
-            device_id = f"{entry.entry_id}_{zone_entity_id.replace('.', '_')}"
-            
-            zone_device_infos[zone_entity_id] = DeviceInfo(
-                identifiers={("multi_trv_heating", device_id)},
-                name=zone.name,
-                manufacturer="Multi-TRV Heating",
-                model="Zone Controller",
-            )
-    
-    manager = MultiTRVHeatingEntityManager(controller, entry.entry_id, zone_device_infos, controller_device_info)
+
+    zone_device_infos = {
+        zone_entity_id: zone_device_info(entry.entry_id, zone_entity_id, zone.name)
+        for zone_entity_id, zone in controller.zones.items()
+    }
+    manager = MultiTRVHeatingEntityManager(
+        controller, entry.entry_id, zone_device_infos, controller_device_info(entry.entry_id)
+    )
     sensors = manager.get_all_sensors()
-    
+
     async_add_entities(sensors, update_before_add=True)
-    _LOGGER.info("Set up %d MultiTRVHeating sensors for entry %s", len(sensors), entry.entry_id)
+    _LOGGER.debug("Set up %d sensors for entry %s", len(sensors), entry.entry_id)
