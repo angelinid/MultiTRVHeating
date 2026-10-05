@@ -205,7 +205,7 @@ class PreheatingController:
         now = datetime.now()
         time_remaining_seconds = (self.preheating_end_time - now).total_seconds()
         if self.preheating_start_time is None:
-            self.preheating_start_time = datetime.now()
+            self.preheating_start_time = now
 
         # Failsafe: if time is already past, return 0 to fall back to normal logic
         if time_remaining_seconds <= 0:
@@ -218,7 +218,7 @@ class PreheatingController:
         max_thermal_load = self._get_max_high_priority_thermal_load()
 
         if (now - self.preheating_start_time).total_seconds() / 60.0 > 5 and max_thermal_load <= 0:
-            _LOGGER.debug("No high-priority zones need heating, pre-heating complete")
+            _LOGGER.debug("No high-priority zones need heating, pre-heating complete after %.1f mins", (now - self.preheating_start_time).total_seconds() / 60.0)
             # Need slower adjustment next time
             self._preheating_disabled(0.5)
             return 0.0
