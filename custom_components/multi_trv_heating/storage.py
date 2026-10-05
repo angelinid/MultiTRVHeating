@@ -16,9 +16,13 @@ except ImportError:
     HomeAssistant = None
     Store = None
 
-_LOGGER = logging.getLogger("don_controller")
+try:
+    from .const import DOMAIN, LOGGER_NAME
+except ImportError:
+    from const import DOMAIN, LOGGER_NAME
 
-DOMAIN = "multi_trv_heating"
+_LOGGER = logging.getLogger(LOGGER_NAME)
+
 STORAGE_VERSION = 1
 
 
