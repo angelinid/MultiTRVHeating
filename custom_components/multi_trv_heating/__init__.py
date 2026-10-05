@@ -42,7 +42,8 @@ VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text())["ver
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the controller from a config entry and forward to the entity platforms."""
-    _LOGGER.info("Multi-TRV Heating v%s starting", VERSION)
+    # Warning level on purpose: visible with HA's default log config, so deploys can be verified
+    _LOGGER.warning("Multi-TRV Heating v%s starting", VERSION)
     storage = StateStorage(hass)
     await storage.async_load()
     set_storage(storage)

@@ -125,7 +125,11 @@ class ZoneWrapper:
                 self.trv_opening_percent, self.is_demanding_heat,
             )
         except (ValueError, TypeError, AttributeError) as e:
-            _LOGGER.error("Error parsing state for zone '%s': %s", self.name, e)
+            if new_state.state in ("unknown", "unavailable"):
+                # Expected for a few seconds after HA boots, before entities report
+                _LOGGER.debug("Zone '%s' not ready (state %s)", self.name, new_state.state)
+            else:
+                _LOGGER.warning("Error parsing state for zone '%s': %s", self.name, e)
 
     def update_trv_opening(self, opening_percent: float) -> bool:
         """
