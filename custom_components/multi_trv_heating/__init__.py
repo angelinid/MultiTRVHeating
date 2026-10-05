@@ -24,16 +24,25 @@ SOFTWARE.
 
 """Multi-TRV Heating integration entry point."""
 
+import json
+import logging
+from pathlib import Path
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, PLATFORMS
+from .const import DOMAIN, LOGGER_NAME, PLATFORMS
 from .master_controller import MasterController
 from .storage import StateStorage, set_storage
+
+_LOGGER = logging.getLogger(LOGGER_NAME)
+
+VERSION = json.loads((Path(__file__).parent / "manifest.json").read_text())["version"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the controller from a config entry and forward to the entity platforms."""
+    _LOGGER.info("Multi-TRV Heating v%s starting", VERSION)
     storage = StateStorage(hass)
     await storage.async_load()
     set_storage(storage)
