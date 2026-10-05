@@ -455,7 +455,7 @@ class MasterController:
         
         if self.current_flow_temp == 0 and final_temp > 0 and self.hass:
             # Give time to the valves to fully open (only in production with real HA instance)
-            await asyncio.sleep(10)
+            await asyncio.sleep(20)
         
         # Track the current flow temperature for sensor reporting
         self.current_flow_temp = final_temp
