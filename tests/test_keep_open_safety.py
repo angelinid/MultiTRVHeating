@@ -566,6 +566,44 @@ class KeepOpenSafetyTests:
         self.verify(zone.counts_as_high_priority, "high priority while held by switch")
         s.close()
 
+    async def test_27b_no_writes_before_entities_exist(self):
+        print("\nTest 27b: Calibration entities not there yet at startup - nothing is written into the void")
+        s = standard_house(discharge=None)
+        for v in s.valves.values():
+            v.calibration = -2.0
+        c = await s.start(prep=lambda: [s.hass.states.pop(v.calib_id) for v in s.valves.values()])
+        await s.run(60)
+        self.verify(not s.calibration_writes, f"no writes while the entities are missing ({len(s.calibration_writes)})")
+        for v in s.valves.values():                 # Z2M entities come online reporting -2
+            await s._emit(c._async_calibration_change, v.calib_id, '-2.0')
+        await s.run(5 * MINUTE)
+        counts = {k: len(s.writes_for(k)) for k in s.valves}
+        self.verify(all(n == 1 for n in counts.values()), f"each TRV corrected exactly once once it exists ({counts})")
+        self.verify(all(v.calibration == 0.0 for v in s.valves.values()), "all neutral")
+        s.close()
+
+    async def test_27c_decision_rechecked_after_valve_open_wait(self):
+        print("\nTest 27c: Boiler start waits for the valves, then decides again instead of committing a stale ON")
+        s = standard_house(others=(14.0, 19.0), discharge=None)
+        c = await s.start()
+        await s.run(2 * MINUTE)
+        self.verify(c.current_flow_temp > 0, "boiler running (setup)")
+        c.current_flow_temp = 0.0                  # as if it had been off
+        c.valve_open_delay = 5
+        real_sleep = asyncio.sleep
+
+        async def fake_sleep(_delay):              # while we wait, every room reaches its target
+            for zone in c.zones.values():
+                zone.target_temp = 10.0
+                zone._refresh_temperature()
+        asyncio.sleep = fake_sleep
+        try:
+            await c._calculate_and_command()
+        finally:
+            asyncio.sleep = real_sleep
+        self.verify(c.current_flow_temp == 0.0, f"boiler not started on the stale decision (flow {c.current_flow_temp})")
+        s.close()
+
     # ------------------------------------------------------------------
     # Fuzz
     # ------------------------------------------------------------------

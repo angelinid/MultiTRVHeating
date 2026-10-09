@@ -318,12 +318,12 @@ class MasterController:
         await self._calculate_and_command()
 
     def calibration_unavailable(self, zone: ZoneWrapper) -> bool:
-        """True if the zone's calibration entity exists but is offline (cannot be written)."""
+        """True if the zone's calibration entity is missing or offline, so it cannot be written."""
         states = getattr(self.hass, "states", None)
         if states is None or not zone.temp_calib_entity_id:
             return False
         state = states.get(zone.temp_calib_entity_id)
-        return state is not None and state.state == "unavailable"
+        return state is None or state.state == "unavailable"
 
     def pump_overrun_active(self, now: float) -> bool:
         """True while the boiler pump may still be running after the boiler was stopped."""
@@ -374,12 +374,8 @@ class MasterController:
             self._calc_waiting = False
             await self._run_cycle()
 
-    async def _run_cycle(self) -> None:
-        if self.component_enabled is False:
-            _LOGGER.debug("Component disabled - skipping boiler calculation")
-            return
-
-        now = self.now()
+    def _decide(self, now: float) -> tuple[float, str]:
+        """Keep-open update, boiler decision and interlock. Returns (flow temperature, reason)."""
         self.keep_open.update(now)
 
         boiler_should_be_on, boiler_demand, reason = self._evaluate_boiler_demand()
@@ -410,26 +406,31 @@ class MasterController:
             reason = "interlock: no open valve"
         else:
             self._interlock_active = False
+        return flow_temp, reason
 
+    async def _run_cycle(self) -> None:
+        if self.component_enabled is False:
+            _LOGGER.debug("Component disabled - skipping boiler calculation")
+            return
+
+        now = self.now()
+        flow_temp, reason = self._decide(now)
         await self._sync_offsets(now)
+
+        if flow_temp > 0 and self.current_flow_temp == 0 and self.hass and self.valve_open_delay > 0:
+            # Starting the boiler from OFF: give the valves time to open, then decide again on what
+            # the house looks like by then instead of committing a stale decision
+            await asyncio.sleep(self.valve_open_delay)
+            now = self.now()
+            flow_temp, reason = self._decide(now)
+            await self._sync_offsets(now)
+
         await self.set_opentherm_flow_temp(flow_temp, reason)
 
     async def set_opentherm_flow_temp(self, flow_temp: float, reason: str = "") -> None:
-        """
-        Record the boiler flow temperature request (clamped to MIN..MAX, 0 = OFF).
-
-        When switching the boiler on from OFF, waits valve_open_delay seconds first so the
-        valves can open (only with a real HA instance), then checks again that one is open.
-        """
+        """Record the boiler flow temperature request (clamped to MIN..MAX, 0 = OFF)."""
         final_temp = max(MIN_FLOW_TEMP, min(MAX_FLOW_TEMP, flow_temp)) if flow_temp > 0 else 0.0
         previous = self.current_flow_temp
-
-        if previous == 0 and final_temp > 0 and self.hass:
-            await asyncio.sleep(self.valve_open_delay)
-            if not self.has_open_valve():
-                _LOGGER.warning("Interlock: no valve opened within %.0f s, boiler stays off", self.valve_open_delay)
-                final_temp = 0.0
-                reason = "interlock: no open valve"
 
         self.current_flow_temp = final_temp
 
