@@ -5,7 +5,7 @@
 The Multi-TRV Heating Controller uses a **rationalized, modular test architecture** with organized test suites grouped by functionality:
 
 - **Core Tests** (16 tests) - Essential heating logic ✓ 100% passing
-- **Feature Tests** (22 tests) - Advanced features (pump discharge, pre-heating)
+- **Feature Tests** (22 tests) - Advanced features (pre-heating, effective temperature, hold mode, keep-open safety simulation)
 - **Integration Tests** (39 tests) - Home Assistant sensor integration ✓ 100% passing
 
 **Total: 77 tests across 3 suites**
@@ -30,7 +30,10 @@ tests/
 │   ├── Edge cases
 │   └── Realistic scenarios
 │
-├── test_pump_discharge.py         # FEATURES: Pump discharge (8 tests)
+├── test_effective_temperature.py  # FEATURES: external sensor / offset removal
+├── test_hold_mode.py              # FEATURES: hold offsets, virtual opening, opening curve
+├── test_keep_open_safety.py       # FEATURES: safety scenarios on sim_house.py (slow actuators, pump overrun, fuzz)
+├── sim_house.py                   # Physical simulation used by the safety tests
 │   ├── TRV exclusion from calculations
 │   ├── Discharge activation/deactivation
 │   ├── Timeout management

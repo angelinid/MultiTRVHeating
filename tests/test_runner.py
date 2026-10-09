@@ -3,7 +3,7 @@ Unified Test Runner for Multi-TRV Heating Controller
 
 This module orchestrates all test suites across the project:
 - Core Tests: Zone wrapping, demand calculations, boiler control
-- Feature Tests: Pump discharge, pre-heating, temperature offsets
+- Feature Tests: Pre-heating, effective temperature, hold mode, keep-open safety
 - Integration Tests: Multi-zone scenarios, realistic house models
 - Sensor Tests: Entity creation and state management
 
@@ -15,7 +15,7 @@ Usage:
 
 Architecture:
     - Core tests (test_suite.py): 16 tests - Essential heating logic
-    - Feature tests (test_pump_discharge.py): 8 tests - Pump discharge
+    - Feature tests: pre-heating, effective temperature, hold mode, keep-open safety
     - Feature tests (test_preheating.py): 10 tests - Pre-heating mode
     - Integration tests (test_sensors.py): Sensor entity management
 """
@@ -102,37 +102,22 @@ class UnifiedTestRunner:
             self.results['core']['total'] = 1
     
     async def _run_feature_tests(self) -> None:
-        """Run feature tests (pump discharge, preheating)."""
+        """Run feature tests (preheating, effective temperature, hold mode, keep-open)."""
         print("\n" + "-"*80)
         print("FEATURE TESTS: Advanced Heating Features")
         print("-"*80)
-        print("Testing: Pump discharge, pre-heating, temperature offsets")
+        print("Testing: Pre-heating, effective temperature, hold mode, keep-open safety")
         print()
-        
-        # Pump discharge tests
-        await self._run_pump_discharge_tests()
         
         # Pre-heating tests
         await self._run_preheating_tests()
-    
-    async def _run_pump_discharge_tests(self) -> None:
-        """Run pump discharge tests."""
-        print("\n  Pump Discharge Tests:")
-        print("  " + "-"*76)
-        
-        try:
-            from test_pump_discharge import PumpDischargeTestSuite
-            suite = PumpDischargeTestSuite(log_level=self.log_level)
-            await suite.run_all_tests()
-            
-            self.results['features']['passed'] += suite.passed_tests
-            self.results['features']['failed'] += suite.failed_tests
-            self.results['features']['total'] += suite.passed_tests + suite.failed_tests
-            
-        except Exception as e:
-            self.log.warning(f"Pump discharge tests failed to run: {e}")
-            self.results['features']['failed'] += 1
-            self.results['features']['total'] += 1
+
+        # Effective temperature tests
+        await self._run_effective_temperature_tests()
+
+        # Hold mode and keep-open safety (simulation)
+        await self._run_hold_mode_tests()
+        await self._run_keep_open_safety_tests()
     
     async def _run_preheating_tests(self) -> None:
         """Run pre-heating tests."""
@@ -153,6 +138,63 @@ class UnifiedTestRunner:
             self.results['features']['failed'] += 1
             self.results['features']['total'] += 1
     
+    async def _run_effective_temperature_tests(self) -> None:
+        """Run effective temperature tests."""
+        print("\n  Effective Temperature Tests:")
+        print("  " + "-"*76)
+
+        try:
+            from test_effective_temperature import TestEffectiveTemperature
+            suite = TestEffectiveTemperature()
+            suite.run_all_tests()
+
+            self.results['features']['passed'] += suite.passed
+            self.results['features']['failed'] += suite.failed
+            self.results['features']['total'] += suite.passed + suite.failed
+
+        except Exception as e:
+            self.log.warning(f"Effective temperature tests failed to run: {e}")
+            self.results['features']['failed'] += 1
+            self.results['features']['total'] += 1
+
+    async def _run_hold_mode_tests(self) -> None:
+        """Run hold mode unit tests."""
+        print("\n  Hold Mode Tests:")
+        print("  " + "-"*76)
+
+        try:
+            from test_hold_mode import TestHoldMode
+            suite = TestHoldMode()
+            suite.run_all_tests()
+
+            self.results['features']['passed'] += suite.passed
+            self.results['features']['failed'] += suite.failed
+            self.results['features']['total'] += suite.passed + suite.failed
+
+        except Exception as e:
+            self.log.warning(f"Hold mode tests failed to run: {e}")
+            self.results['features']['failed'] += 1
+            self.results['features']['total'] += 1
+
+    async def _run_keep_open_safety_tests(self) -> None:
+        """Run the keep-open safety scenarios on the physical simulation."""
+        print("\n  Keep-open Safety Tests (simulation):")
+        print("  " + "-"*76)
+
+        try:
+            from test_keep_open_safety import KeepOpenSafetyTests
+            suite = KeepOpenSafetyTests()
+            await suite.run_all_tests()
+
+            self.results['features']['passed'] += suite.passed
+            self.results['features']['failed'] += suite.failed
+            self.results['features']['total'] += suite.passed + suite.failed
+
+        except Exception as e:
+            self.log.warning(f"Keep-open safety tests failed to run: {e}")
+            self.results['features']['failed'] += 1
+            self.results['features']['total'] += 1
+
     async def _run_integration_tests(self) -> None:
         """Run integration tests (sensors)."""
         print("\n" + "-"*80)

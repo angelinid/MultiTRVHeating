@@ -61,5 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload the entity platforms and drop the controller."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    controller = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    if controller is not None:
+        await controller.async_stop_listening()
     return unload_ok

@@ -1,7 +1,7 @@
 """
 Home Assistant select entities for MultiTRVHeating.
 
-- Controller: which zone's TRV is used as the pump discharge valve ("Off" disables)
+- Controller: which zone's TRV is held open so a valve is never left shut ("Off" disables)
 """
 
 import logging
@@ -49,7 +49,7 @@ class MultiTRVHeatingSelect(PersistentEntityMixin, SelectEntity):
 
 
 class DischargeTRVSelect(MultiTRVHeatingSelect):
-    """Choose the zone whose TRV keeps the pump circulating after the boiler stops."""
+    """Choose the zone whose TRV is held open when the other valves are about to close."""
 
     STORAGE_PREFIX = "discharge_trv_select"
 
@@ -75,27 +75,27 @@ class DischargeTRVSelect(MultiTRVHeatingSelect):
             self._attr_current_option = self._option_from_controller()
 
     def _option_from_controller(self) -> str:
-        """Current option according to the controller's pump discharge config."""
-        if not self.controller or not self.controller.pump_discharge:
+        """Current option according to the controller's keep-open config."""
+        if not self.controller or not self.controller.keep_open:
             return OPTION_OFF
-        name = self.controller.pump_discharge.discharge_trv_name
+        name = self.controller.keep_open.discharge_trv_name
         if name and name != "Unknown" and name in self._attr_options:
             return name
         return OPTION_OFF
 
     def _apply_option(self, option: str) -> bool:
-        """Point pump discharge at the zone named `option` (or disable). False if not found."""
+        """Point the keep-open valve at the zone named `option` (or disable). False if not found."""
         if option == OPTION_OFF:
-            self.controller.pump_discharge.update_config(None, None)
+            self.controller.keep_open.update_config(None, None)
             return True
         for zone in self.controller.zones.values():
             if zone.name == option:
-                self.controller.pump_discharge.update_config(zone.entity_id, zone.name)
+                self.controller.keep_open.update_config(zone.entity_id, zone.name)
                 return True
         return False
 
     async def async_select_option(self, option: str) -> None:
-        if not self.controller or not self.controller.pump_discharge:
+        if not self.controller or not self.controller.keep_open:
             _LOGGER.warning("Discharge TRV select: controller not available")
             return
 

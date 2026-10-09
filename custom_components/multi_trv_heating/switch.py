@@ -21,6 +21,7 @@ except ImportError:
     ConfigEntry = None
 
 from .const import LOGGER_NAME
+from .zone_wrapper import HOLD_SWITCH
 from .entity import (
     PersistentEntityMixin,
     controller_device_info,
@@ -101,6 +102,84 @@ class ZonePrioritySwitch(MultiTRVHeatingSwitch):
         self.zone.is_high_priority = value
         self._attr_is_on = value
         _LOGGER.info("Zone '%s' set to %s priority", self.zone.name, "high" if value else "low")
+        return True
+
+
+class HoldOpenSwitch(MultiTRVHeatingSwitch):
+    """
+    Hold a zone's valve open (e.g. a bedroom overnight).
+
+    While ON the TRV is forced open through its calibration offset, the zone asks for heat from
+    its room temperature (external sensor when available) and, whatever its priority, is
+    treated like a high-priority zone. State survives restarts.
+    """
+
+    STORAGE_PREFIX = "zone_hold_open"
+
+    def __init__(self, zone_name: str, zone_entity_id: str, zone, controller,
+                 entry_id: Optional[str] = None, device_info: Optional[Any] = None,
+                 hass: Optional[Any] = None) -> None:
+        super().__init__(
+            f"{zone_name} Hold Open",
+            prefixed_unique_id(entry_id, f"multi_trv_{zone_slug(zone_name)}_hold_open_switch"),
+            "mdi:lock-open-variant",
+            device_info,
+        )
+        self.zone = zone
+        self.zone_entity_id = zone_entity_id
+        self.controller = controller
+        self.hass = hass
+
+        stored_value = self._restore_stored()
+        if stored_value and zone and controller:
+            # Applied by the next control cycle (timer or event); the offset is re-asserted then
+            self.controller.apply_hold(zone, HOLD_SWITCH, True, controller.now())
+            _LOGGER.info("Restored zone '%s' hold open from storage", zone_name)
+
+    @property
+    def is_on(self) -> bool:
+        return self.zone.has_hold(HOLD_SWITCH) if self.zone else False
+
+    async def _async_set(self, value: bool) -> None:
+        if not self.zone or not self.controller:
+            return
+        await self.controller.async_set_zone_hold(self.zone, HOLD_SWITCH, value)
+        self.async_write_ha_state()
+        await self._async_persist(value)
+
+
+class HoldWritesSwitch(MultiTRVHeatingSwitch):
+    """Write the hold offset to the TRVs. OFF = log-only: holds are decided and logged but not applied."""
+
+    STORAGE_PREFIX = "hold_writes_enabled"
+
+    def __init__(self, controller, entry_id: Optional[str] = None,
+                 controller_device: Optional[Any] = None,
+                 hass: Optional[Any] = None) -> None:
+        super().__init__(
+            name="Hold Offset Writes",
+            unique_id=f"{entry_id}_hold_writes" if entry_id else "multi_trv_hold_writes",
+            icon="mdi:pencil-lock",
+            device_info=controller_device,
+        )
+        self.controller = controller
+        self.hass = hass
+        self._attr_has_entity_name = True
+
+        stored_value = self._restore_stored()
+        if stored_value is None:
+            stored_value = False  # Default: log-only until switched on
+        self._is_on = stored_value
+        self.controller.hold_writes_enabled = stored_value
+
+    @property
+    def is_on(self) -> bool:
+        return self._is_on
+
+    def _apply(self, value: bool) -> bool:
+        self.controller.hold_writes_enabled = value
+        self._is_on = value
+        _LOGGER.info("Hold offset writes %s", "enabled" if value else "disabled (log-only)")
         return True
 
 
@@ -212,7 +291,15 @@ async def async_setup_entry(
         manufacturer="Custom",
         model="Multi-Zone TRV Heating",
     )
+    switches.extend(
+        HoldOpenSwitch(
+            zone.name, zone_entity_id, zone, controller, entry.entry_id,
+            zone_device_info(entry.entry_id, zone_entity_id, zone.name), hass,
+        )
+        for zone_entity_id, zone in controller.zones.items()
+    )
     switches.append(PreheatingEnableSwitch(controller, entry.entry_id, controller_device, hass))
+    switches.append(HoldWritesSwitch(controller, entry.entry_id, controller_device, hass))
     switches.append(ComponentEnableSwitch(controller, entry.entry_id, controller_device, hass))
 
     async_add_entities(switches, update_before_add=True)
