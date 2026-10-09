@@ -184,8 +184,9 @@ class KeepOpenController:
 
         self.last_reason = "pump overrun" if (can_release and overrun) else "holding"
 
-        # The selected valve was changed while holding: hold the new one too
-        if need and primary is not None and not primary.has_hold(HOLD_AUTO) and self._usable(primary):
+        # The selected valve was changed while holding: hold the new one too; the old one is
+        # released below once the new one is measured open
+        if not primary.has_hold(HOLD_AUTO) and self._usable(primary) and primary.position_available:
             changed |= self._engage(primary, now, "selected valve changed")
 
         # A held valve that cannot be driven (offline, calibration entity unavailable) is no use:

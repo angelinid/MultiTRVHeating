@@ -106,6 +106,9 @@ class DischargeTRVSelect(MultiTRVHeatingSelect):
             _LOGGER.warning("Discharge TRV select: no zone named '%s'", option)
             self._attr_current_option = OPTION_OFF
 
+        # Move the hold now instead of waiting for the next control cycle
+        await self.controller._calculate_and_command()
+
         self.async_write_ha_state()
         await self._async_persist(self._attr_current_option)
 

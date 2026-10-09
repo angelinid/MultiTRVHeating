@@ -312,6 +312,11 @@ class MasterController:
         _LOGGER.info("Zone '%s': %s hold %s", zone.name, reason, "on" if active else "off")
         await self._calculate_and_command()
 
+    async def async_set_keep_open_valve(self, entity_id: Optional[str], name: Optional[str]) -> None:
+        """Select the keep-open (discharge) valve; the hold moves to it on the spot."""
+        self.keep_open.update_config(entity_id, name)
+        await self._calculate_and_command()
+
     def calibration_unavailable(self, zone: ZoneWrapper) -> bool:
         """True if the zone's calibration entity exists but is offline (cannot be written)."""
         states = getattr(self.hass, "states", None)

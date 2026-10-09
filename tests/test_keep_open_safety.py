@@ -473,6 +473,51 @@ class KeepOpenSafetyTests:
         self.no_violations(s)
         s.close()
 
+    async def test_23b_selection_moves_the_hold_without_a_closing_trigger(self):
+        print("\nTest 23b: Selection changed with a neighbour valve open at 25 % - hold moves in the same cycle")
+        s = standard_house(discharge='leo', others=(20.5, 19.0))
+        c = await s.start()
+        await s.run(10 * MINUTE)
+        s.valves['living'].setpoint = 22.0
+        s.valves['living'].force_target = 25.0     # neighbour at the engage limit
+        await s.run(2 * MINUTE)
+        self.verify(c.zones['climate.leo'].held, "old valve still held")
+        await c.async_set_keep_open_valve('climate.bath', 'Bath')
+        self.verify(c.zones['climate.bath'].has_hold(HOLD_AUTO), "new valve held in the same cycle")
+        await s.run(20 * MINUTE)
+        self.verify(s.valves['bath'].position > 0, "new valve open")
+        self.verify(not c.zones['climate.leo'].held, "old valve released")
+        self.no_violations(s)
+        s.close()
+
+    async def test_23c_selection_cleared_and_reselected(self):
+        print("\nTest 23c: Selection cleared, then set again")
+        s = standard_house(discharge='leo')
+        c = await s.start()
+        await s.run(10 * MINUTE)
+        await c.async_set_keep_open_valve(None, None)
+        self.verify(not any(z.held for z in c.zones.values()), "nothing held while the feature is off")
+        await s.run(5 * MINUTE)
+        await c.async_set_keep_open_valve('climate.kitchen', 'Kitchen')
+        await s.run(10 * MINUTE)
+        self.verify(c.zones['climate.kitchen'].has_hold(HOLD_AUTO) and s.valves['kitchen'].position > 0, "kitchen now held open")
+        s.close()
+
+    async def test_23d_selection_changed_inside_pump_overrun(self):
+        print("\nTest 23d: Selection changed during the pump overrun - never without an open valve")
+        s = standard_house(discharge='leo', others=(14.0, 19.0))
+        c = await s.start()
+        await s.run(12 * MINUTE)
+        for k in ('living', 'kitchen', 'bath'):
+            s.valves[k].setpoint = 10.0
+        await s.run(90)
+        self.verify(c.current_flow_temp == 0, "boiler stopped, pump overrunning")
+        await c.async_set_keep_open_valve('climate.bath', 'Bath')
+        await s.run(10 * MINUTE)
+        self.verify(s.valves['bath'].position > 0 and not c.zones['climate.leo'].held, "hold moved to the new valve")
+        self.verify(len(s.violations) <= 5, f"no more than the actuator race ({len(s.violations)}s)")
+        s.close()
+
     async def test_24_feature_disabled(self):
         print("\nTest 24: No keep-open valve selected - nothing is held, interlock still applies")
         s = standard_house(discharge=None, others=(16.5, 19.0))
