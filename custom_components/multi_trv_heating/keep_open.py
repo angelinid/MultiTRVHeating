@@ -83,6 +83,7 @@ class KeepOpenController:
         self.engaged_at: Optional[float] = None       # controller clock, first auto hold of this episode
         self.last_escalation_at: Optional[float] = None
         self.release_ok_since: Optional[float] = None   # other valves have been providing flow since
+        self._warned_unholdable = False                 # "no valve can be held" already logged this episode
         self.last_reason = "idle"
         _LOGGER.debug(
             "Keep-open valve: %s (%s)", discharge_trv_entity_id or "not set", self.discharge_trv_name
@@ -169,6 +170,7 @@ class KeepOpenController:
             if need:
                 changed |= self._engage_first_usable(now, f"other valves max {anchor_max:.0f}%, sum {anchor_sum:.0f}%")
             else:
+                self._warned_unholdable = False
                 self.last_reason = "other valves open"
             return changed
 
@@ -209,6 +211,7 @@ class KeepOpenController:
         return changed
 
     def _engage(self, zone: ZoneWrapper, now: float, why: str) -> bool:
+        self._warned_unholdable = False
         changed = self.controller.apply_hold(zone, HOLD_AUTO, True, now)
         if self.engaged_at is None:
             self.engaged_at = now
@@ -225,7 +228,10 @@ class KeepOpenController:
         for zone in self._candidates():
             if self._usable(zone):
                 return self._engage(zone, now, why)
-        _LOGGER.warning("Keep-open: needed but no valve can be held (no usable calibration entity)")
+        # Logged once per episode: every state change reruns this, e.g. dozens of times while HA boots
+        if not self._warned_unholdable:
+            _LOGGER.warning("Keep-open: needed but no valve can be held (no usable calibration entity)")
+            self._warned_unholdable = True
         self.last_reason = "no usable valve"
         return False
 

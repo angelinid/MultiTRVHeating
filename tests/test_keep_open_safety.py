@@ -604,6 +604,36 @@ class KeepOpenSafetyTests:
         self.verify(c.current_flow_temp == 0.0, f"boiler not started on the stale decision (flow {c.current_flow_temp})")
         s.close()
 
+    async def test_27d_unholdable_warning_logged_once(self):
+        print("\nTest 27d: 'no valve can be held' is logged once per episode, not on every event")
+        import logging
+        records = []
+
+        class Catch(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+        logger = logging.getLogger('don_controller')
+        handler = Catch()
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            s = standard_house()
+            c = await s.start(prep=lambda: [s.hass.states.pop(v.calib_id) for v in s.valves.values()])
+            for _ in range(30):                      # a burst of events while HA boots
+                await c._calculate_and_command()
+            await s.run(30)
+            n = sum('no valve can be held' in r for r in records)
+            self.verify(n == 1, f"one warning for the whole episode (got {n})")
+            for v in s.valves.values():              # entities appear: hold works, episode over
+                s._set(v.calib_id, '0.0')
+                await s._emit(c._async_calibration_change, v.calib_id, '0.0')
+            await s.run(60)
+            self.verify(any(z.held for z in c.zones.values()), "a valve is held once the entities exist")
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(logging.CRITICAL)
+            s.close()
+
     # ------------------------------------------------------------------
     # Fuzz
     # ------------------------------------------------------------------
