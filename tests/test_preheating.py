@@ -489,6 +489,51 @@ class TestPreheating:
             f"Should clamp to maximum 5.0, got {self.controller.preheating.tuning_constant:.3f}"
         )
 
+    def test_15_no_request_without_thermal_load(self):
+        """Pre-heating asks for nothing while no high-priority zone needs heat; the cycle ends after the minimum run."""
+        print("\nTest 15: No thermal load - no request of its own")
+        self.setup_controller()
+        pre = self.controller.preheating
+        pre.preheating_end_time = datetime.now() + timedelta(hours=10)
+        pre.is_enabled = True
+        flow = pre.calculate_flow_temp_override()
+        self.verify(flow == 0.0, f"no request without thermal load (got {flow})")
+        self.verify(pre.is_enabled, "cycle still running in the first minutes")
+        pre.preheating_start_time = datetime.now() - timedelta(minutes=6)
+        pre.calculate_flow_temp_override()
+        self.verify(not pre.is_enabled, "cycle ends after the minimum run")
+
+    def test_16_listeners_told_when_the_cycle_ends(self):
+        """Entities persist internal changes (cycle end, learned tuning constant) through listeners."""
+        print("\nTest 16: Listeners are called on internal changes")
+        self.setup_controller()
+        pre = self.controller.preheating
+        calls = []
+        pre.add_listener(lambda: calls.append(pre.is_enabled))
+        pre.preheating_end_time = datetime.now() - timedelta(minutes=1)
+        pre.is_enabled = True
+        pre.calculate_flow_temp_override()
+        self.verify(len(calls) >= 1, f"listener called when the cycle ended ({len(calls)} calls)")
+        self.verify(calls[-1] is False, "listener sees pre-heating disabled")
+
+    def test_17_preheating_never_lowers_the_normal_demand(self):
+        """Pre-heating only adds: the request is the larger of the normal one and the pre-heating one."""
+        print("\nTest 17: Pre-heating adds to normal demand")
+        self.setup_controller()
+        zone = self.controller.zones['climate.living_room']
+        zone.current_error = 2.0
+        zone.trv_opening_percent = 50.0
+        zone.position_available = True
+        zone.is_demanding_heat = True
+        pre = self.controller.preheating
+        pre.preheating_end_time = datetime.now() + timedelta(hours=10)
+        pre.is_enabled = True
+        flow, reason = self.controller._decide(self.controller.now())
+        self.verify(abs(flow - 42.5) < 0.01, f"normal demand (42.5) wins over the tiny pre-heating request (got {flow}, {reason})")
+        pre.preheating_end_time = datetime.now() + timedelta(minutes=10)
+        flow, reason = self.controller._decide(self.controller.now())
+        self.verify(flow > 42.5 and reason == "pre-heating", f"pre-heating wins when it asks for more (got {flow}, {reason})")
+
     def run_all_tests(self):
         """Run all pre-heating tests."""
         print("\n" + "="*80)
@@ -509,6 +554,9 @@ class TestPreheating:
         self.test_12_tuning_constant_increases_when_time_runs_out()
         self.test_13_tuning_constant_adjustment_with_low_pass_filter()
         self.test_14_tuning_constant_clamped_to_valid_range()
+        self.test_15_no_request_without_thermal_load()
+        self.test_16_listeners_told_when_the_cycle_ends()
+        self.test_17_preheating_never_lowers_the_normal_demand()
         
         print("\n" + "="*80)
         print(f"RESULTS: {self.passed} passed, {self.failed} failed")

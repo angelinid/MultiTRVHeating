@@ -408,13 +408,13 @@ class MasterController:
             for zone in self.zones.values():
                 zone.reset_policy_offset()
 
+        flow_temp = demand_to_flow_temp(boiler_demand) if boiler_should_be_on and boiler_demand > 0 else 0.0
         if self.preheating.is_active():
-            flow_temp = self.preheating.calculate_flow_temp_override()
-            reason = "pre-heating"
-        elif boiler_should_be_on and boiler_demand > 0:
-            flow_temp = demand_to_flow_temp(boiler_demand)
-        else:
-            flow_temp = 0.0
+            # Pre-heating only adds to the normal demand, it never lowers it
+            preheating_flow = self.preheating.calculate_flow_temp_override()
+            if preheating_flow > flow_temp:
+                flow_temp = preheating_flow
+                reason = "pre-heating"
 
         if flow_temp > 0 and not self.has_open_valve():
             # Logged once per episode: it can persist for hours (e.g. waiting for a valve to open)

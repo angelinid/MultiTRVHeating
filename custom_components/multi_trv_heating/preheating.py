@@ -24,7 +24,12 @@ SOFTWARE.
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
+
+try:
+    from homeassistant.util import dt as _dt_util
+except ImportError:  # unit tests run without Home Assistant
+    _dt_util = None
 
 try:
     from .const import LOGGER_NAME, MAX_FLOW_TEMP, MIN_FLOW_TEMP
@@ -55,6 +60,11 @@ TUNING_ADJ_EXPIRED = 2.0    # Ran out of time: be more aggressive next time
 TUNING_ADJ_COMPLETED = 0.5  # Zones reached target early: be gentler next time
 
 
+def local_now() -> datetime:
+    """Current time in Home Assistant's configured time zone (the host clock may be UTC)."""
+    return _dt_util.now() if _dt_util is not None else datetime.now()
+
+
 class PreheatingController:
     """
     Pre-heating: run the boiler hotter ahead of a target end time.
@@ -70,6 +80,19 @@ class PreheatingController:
         self.preheating_start_time: Optional[datetime] = None
         self.is_enabled: bool = False
         self.tuning_constant: float = DEFAULT_PREHEATING_TUNING_CONSTANT
+        # Called when the controller changes its own state (cycle ended, tuning learned) so the
+        # entities can persist it and refresh. UI changes are persisted by the entities themselves.
+        self._listeners: list[Callable[[], None]] = []
+
+    def add_listener(self, listener: Callable[[], None]) -> None:
+        self._listeners.append(listener)
+
+    def _notify(self) -> None:
+        for listener in self._listeners:
+            try:
+                listener()
+            except Exception:  # an entity failing to persist must not break the control loop
+                _LOGGER.exception("Pre-heating state listener failed")
 
     def _preheating_disabled(self, tuning_adj: float) -> None:
         """End the current cycle, disable pre-heating and learn from the outcome."""
@@ -78,6 +101,7 @@ class PreheatingController:
         self.is_enabled = False
         _LOGGER.info("Pre-heating stopped (tuning adjustment factor %.1f)", tuning_adj)
         self._update_tuning_constant(self.tuning_constant * tuning_adj)
+        self._notify()
 
     def _update_tuning_constant(self, new_value: float) -> None:
         """Blend a (clamped) new value into the tuning constant with a low-pass filter."""
@@ -88,13 +112,14 @@ class PreheatingController:
             "Pre-heating tuning constant updated: old=%.3f, target=%.3f, new=%.3f",
             old_value, clamped_value, self.tuning_constant,
         )
+        self._notify()
 
     def is_active(self) -> bool:
         """True if enabled and the end time is in the future."""
         if self.preheating_end_time is None or self.is_enabled is False:
             return False
 
-        now = datetime.now()
+        now = local_now()
         if self.preheating_end_time > now:
             _LOGGER.debug(
                 "Pre-heating active: %.0f s remaining", (self.preheating_end_time - now).total_seconds()
@@ -116,13 +141,14 @@ class PreheatingController:
 
         Returns 0.0 (and ends the cycle) if pre-heating is disabled, the end time
         has passed, or - after MIN_RUN_MINUTES - no high-priority zone needs heat.
+        Also 0.0 (cycle continues) while no high-priority zone needs heat: no request of its own.
         """
         if self.preheating_end_time is None or self.is_enabled is False:
             _LOGGER.warning("Pre-heating flow temperature requested but pre-heating is disabled")
             self._preheating_disabled(TUNING_ADJ_NONE)
             return 0.0
 
-        now = datetime.now()
+        now = local_now()
         time_remaining_seconds = (self.preheating_end_time - now).total_seconds()
         if self.preheating_start_time is None:
             self.preheating_start_time = now
@@ -139,9 +165,11 @@ class PreheatingController:
         max_thermal_load = self._get_max_high_priority_thermal_load()
 
         elapsed_minutes = (now - self.preheating_start_time).total_seconds() / 60.0
-        if elapsed_minutes > MIN_RUN_MINUTES and max_thermal_load <= 0:
-            _LOGGER.info("Pre-heating complete after %.1f min: no high-priority zone needs heat", elapsed_minutes)
-            self._preheating_disabled(TUNING_ADJ_COMPLETED)
+        if max_thermal_load <= 0:
+            if elapsed_minutes > MIN_RUN_MINUTES:
+                _LOGGER.info("Pre-heating complete after %.1f min: no high-priority zone needs heat", elapsed_minutes)
+                self._preheating_disabled(TUNING_ADJ_COMPLETED)
+            # Nothing to pre-heat: no request of its own, normal control decides
             return 0.0
 
         time_pressure = TIME_PRESSURE_SCALE / time_remaining_seconds
