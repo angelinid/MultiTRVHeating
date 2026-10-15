@@ -209,6 +209,18 @@ class PreheatingEnableSwitch(MultiTRVHeatingSwitch):
             _LOGGER.info("Restored pre-heating enabled from storage: %s", stored_value)
         else:
             self._is_on = self._preheating.is_enabled if self._preheating else False
+        if self._preheating:
+            self._preheating.add_listener(self._on_preheating_change)
+
+    def _on_preheating_change(self) -> None:
+        """The controller ended a cycle by itself: persist the new state and refresh the UI."""
+        self._is_on = self._preheating.is_enabled
+        if self.hass is not None:
+            self.hass.async_create_task(self._async_persist(self._is_on))
+            try:
+                self.async_write_ha_state()
+            except Exception:  # not added to Home Assistant yet
+                pass
 
     @property
     def _preheating(self):
