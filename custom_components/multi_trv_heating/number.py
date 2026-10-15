@@ -32,7 +32,7 @@ from .entity import (
     zone_device_info,
     zone_slug,
 )
-from .preheating import TUNING_CONSTANT_MAX, TUNING_CONSTANT_MIN
+from .preheating import TUNING_CONSTANT_MAX, TUNING_CONSTANT_MIN, local_now
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -107,7 +107,7 @@ class ZoneAreaNumber(MultiTRVHeatingNumber):
 
 def _next_occurrence(hour: int, minute: int) -> datetime:
     """The next datetime (today or tomorrow) at hour:minute."""
-    now = datetime.now()
+    now = local_now()
     end_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if end_time <= now:
         end_time += timedelta(days=1)
@@ -143,7 +143,7 @@ class _PreheatingEndTimeNumber(MultiTRVHeatingNumber):
         self.controller = controller
         self.hass = hass
 
-        now = datetime.now()
+        now = local_now()
         self._attr_native_value = float(getattr(now, self.FIELD))
         stored_value = self._restore_stored()
         if stored_value is not None:
@@ -151,7 +151,7 @@ class _PreheatingEndTimeNumber(MultiTRVHeatingNumber):
                 value = int(float(stored_value))
                 other_default = self.RESTORE_OTHER_DEFAULT
                 if other_default is None:
-                    other_default = getattr(datetime.now(), self.OTHER_FIELD)
+                    other_default = getattr(local_now(), self.OTHER_FIELD)
                 self._set_end_time(value, other_default)
                 self._attr_native_value = float(value)
                 _LOGGER.info("Restored pre-heating end %s from storage: %d", self.FIELD, value)
@@ -174,11 +174,11 @@ class _PreheatingEndTimeNumber(MultiTRVHeatingNumber):
     def native_value(self) -> Optional[float]:
         if self._end_time:
             return float(getattr(self._end_time, self.FIELD))
-        return float(getattr(datetime.now(), self.FIELD))
+        return float(getattr(local_now(), self.FIELD))
 
     async def async_set_native_value(self, value: float) -> None:
         value = int(value)
-        end_time = self._set_end_time(value, getattr(datetime.now(), self.OTHER_FIELD))
+        end_time = self._set_end_time(value, getattr(local_now(), self.OTHER_FIELD))
         self._attr_native_value = float(value)
         self.async_write_ha_state()
         await self._async_persist(value)
@@ -247,6 +247,18 @@ class PreheatingTuningNumber(MultiTRVHeatingNumber):
                 self._attr_native_value = value
                 _LOGGER.info("Restored pre-heating tuning constant from storage: %.3f", value)
             except (ValueError, TypeError):
+                pass
+        self.controller.preheating.add_listener(self._on_preheating_change)
+
+    def _on_preheating_change(self) -> None:
+        """The controller learned a new tuning constant: persist it and refresh the UI."""
+        value = self.controller.preheating.tuning_constant
+        self._attr_native_value = round(value, 3)
+        if self.hass is not None:
+            self.hass.async_create_task(self._async_persist(value))
+            try:
+                self.async_write_ha_state()
+            except Exception:  # not added to Home Assistant yet
                 pass
 
     @property
