@@ -31,16 +31,21 @@ calibration offset (-9 °C): the TRV believes the room is 9 °C colder and opens
 
 ## Keep-open rule (`keep_open.py`)
 
-Uses *measured* openings of the other valves (a closing valve at <= 75 % counts as closed; an
-unavailable sensor counts as closed):
+The selected valve is held **permanently** (v1.2.3). Nothing else releases it: a heat request from
+any other zone, a boost or the pump overrun do not matter, so one valve is always open. The
+held room may run warmer than its target while the boiler runs; that is accepted.
 
-- engage: none open more than 25 % (a valve closing at 25 % or less counts as closed) and the
-  openings add up to less than 100 %;
-- release: one at least 50 % open, or the sum >= 100 %, continuously for 30 s, hold older than
-  30 s, and not within 5 min of a boiler stop (a heat request that turns the boiler on again
-  ends that window);
-- selected valve unavailable/stuck: the next usable valve is held (immediately if it cannot be
-  driven, after 3 min if it is merely not opening).
+The hold moves only when the selected valve changes, as a handover:
+
+- the new valve is held first, the old one stays held;
+- the new valve is *confirmed* when its calibration offset is on the device and it is measured
+  open more than 50 %; only then is the old hold released;
+- not confirmed within 3 min: the old hold is kept and a warning is logged with the reason
+  (offset not applied, setpoint too low, valve not opening);
+- selected valve unavailable/stuck and nothing confirmed: the next usable valve is held as well
+  (immediately if it cannot be driven, after 3 min if it is merely not opening); the extra hold is
+  released once the selected valve is confirmed;
+- no valve selected: the hold is dropped.
 
 The valve is the existing "Discharge TRV" select.
 
@@ -58,16 +63,15 @@ and shown on the sensors but the hold offset is not written to the TRVs.
 
 ## Known limits
 
-- Actuator latency is physical: if the last open valve closes faster than the held valve can open
-  there is a gap of seconds. In simulation (200 random houses per actuator speed) 5-8 houses see
-  such a gap at `CLOSING_ENGAGE_OPENING` = 25 % (mostly 1-22 s, worst 39 s) against 0-1 at 75 %.
-  50 % is the middle ground.
-- With -9 the TRV only stays fully open while the room is below setpoint + 7 °C.
+- With -9 the TRV only opens while its setpoint is above (room temperature - 9 °C). A held valve
+  with a frost setpoint stays shut; the confirmation timeout logs this ("raise the setpoint").
+- Because the hold is permanent there is no engage race: a valve is open before any other closes.
+  The only gap is at boot or after a selection change, covered by the handover rule.
 - A TRV that goes silent looks open until Z2M marks it unavailable (25 min for battery devices).
 - A disabled component stops commanding: the boiler flow keeps its last value.
 - The `heating_status == 'cooling'` clause is left as it was.
 
 ## Tunables
 
-`trv_model.OPENING_CURVE`, `keep_open.py` constants (thresholds, hold and overrun times),
+`trv_model.OPENING_CURVE`, `keep_open.py` constants (`CONFIRM_OPENING`, `CONFIRM_TIMEOUT`, `BOILER_PUMP_OVERRUN`),
 `zone_wrapper.HOLD_TEMP_OFFSET`, `master_controller` write throttling constants.
