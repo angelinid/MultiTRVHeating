@@ -90,6 +90,7 @@ class SimValve:
         self.climate_id = f"climate.{key}"
         self.pos_id = f"sensor.{key}_position"
         self.calib_id = f"number.{key}_calibration"
+        self.boost_id = f"switch.{key}_boost_heating"
         self.ext_id = f"sensor.{key}_room_temp" if ext_sensor else None
         self.last_reported_pos: Optional[float] = None
 
@@ -226,8 +227,15 @@ class SimHouse:
         self._set(v.climate_id, 'heat', self._climate_attrs(v))
         self._set(v.pos_id, str(int(v.position)))
         self._set(v.calib_id, str(float(v.calibration)))
+        self._set(v.boost_id, 'off')
         if v.ext_id:
             self._set(v.ext_id, str(round(v.room.temp, 2)))
+
+    async def set_boost(self, key: str, on: bool) -> None:
+        """TRV boost: the valve is driven fully open by the device while the switch is on."""
+        v = self.valves[key]
+        v.force_target = 100.0 if on else None
+        await self._emit(self.controller._async_boost_change, v.boost_id, 'on' if on else 'off')
 
     async def _emit(self, handler, entity_id: str, state: str, attributes: Optional[dict] = None) -> None:
         new = self._set(entity_id, state, attributes)

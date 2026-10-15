@@ -118,6 +118,7 @@ class UnifiedTestRunner:
         # Hold mode and keep-open safety (simulation)
         await self._run_hold_mode_tests()
         await self._run_keep_open_safety_tests()
+        await self._run_boost_demand_tests()
     
     async def _run_preheating_tests(self) -> None:
         """Run pre-heating tests."""
@@ -192,6 +193,25 @@ class UnifiedTestRunner:
 
         except Exception as e:
             self.log.warning(f"Keep-open safety tests failed to run: {e}")
+            self.results['features']['failed'] += 1
+            self.results['features']['total'] += 1
+
+    async def _run_boost_demand_tests(self) -> None:
+        """Run the boost-as-heat-request scenarios on the physical simulation."""
+        print("\n  Boost Demand Tests (simulation):")
+        print("  " + "-"*76)
+
+        try:
+            from test_boost_demand import BoostDemandTests
+            suite = BoostDemandTests()
+            await suite.run_all_tests()
+
+            self.results['features']['passed'] += suite.passed
+            self.results['features']['failed'] += suite.failed
+            self.results['features']['total'] += suite.passed + suite.failed
+
+        except Exception as e:
+            self.log.warning(f"Boost demand tests failed to run: {e}")
             self.results['features']['failed'] += 1
             self.results['features']['total'] += 1
 

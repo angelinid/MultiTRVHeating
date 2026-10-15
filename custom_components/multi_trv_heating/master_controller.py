@@ -152,6 +152,9 @@ class MasterController:
         self.monitored_calibration_entities = [
             z.temp_calib_entity_id for z in self.zones.values() if z.temp_calib_entity_id
         ]
+        self.monitored_boost_switches = [
+            z.boost_entity_id for z in self.zones.values() if z.boost_entity_id
+        ]
 
     def now(self) -> float:
         """Controller clock (monotonic seconds)."""
@@ -174,6 +177,7 @@ class MasterController:
             (self.monitored_position_sensors, self._async_position_change),
             (self.monitored_external_sensors, self._async_external_temp_change),
             (self.monitored_calibration_entities, self._async_calibration_change),
+            (self.monitored_boost_switches, self._async_boost_change),
         ]
         for entity_ids, handler in listeners:
             if entity_ids:
@@ -217,6 +221,9 @@ class MasterController:
                     zone.update_external_temperature(value)
             if zone.temp_calib_entity_id:
                 zone.update_device_offset(self._parse_state(states.get(zone.temp_calib_entity_id)))
+            if zone.boost_entity_id:
+                boost = states.get(zone.boost_entity_id)
+                zone.set_boosted(boost is not None and boost.state == "on")
 
     @staticmethod
     def _parse_state(state) -> Optional[float]:
@@ -292,6 +299,19 @@ class MasterController:
 
         if zone:
             zone.update_device_offset(self._parse_state(new_state))
+            await self._calculate_and_command()
+
+    async def _async_boost_change(self, event) -> None:
+        """TRV boost switch changed: a boosted zone is a heat request."""
+        entity_id = event.data.get('entity_id')
+        new_state = event.data.get('new_state')
+        zone = self._zone_for_sensor('boost_entity_id', entity_id)
+
+        if zone:
+            boosted = new_state is not None and new_state.state == "on"
+            if boosted != zone.boosted:
+                _LOGGER.info("Zone '%s': boost %s", zone.name, "on" if boosted else "off")
+            zone.set_boosted(boosted)
             await self._calculate_and_command()
 
     async def _async_tick(self, _now=None) -> None:

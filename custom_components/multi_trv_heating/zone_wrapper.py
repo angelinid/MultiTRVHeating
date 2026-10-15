@@ -59,6 +59,13 @@ HOLD_SWITCH = "switch"   # User/schedule asked for it (e.g. a child's room overn
 HOLD_AUTO = "auto"       # Keep-open controller: never leave every valve closed
 
 
+def default_boost_entity_id(climate_entity_id: Optional[str]) -> Optional[str]:
+    """switch.<name>_boost_heating for climate.<name> (None if the id has no climate prefix)."""
+    if climate_entity_id and climate_entity_id.startswith("climate."):
+        return f"switch.{climate_entity_id.split('.', 1)[1]}_boost_heating"
+    return None
+
+
 class ZoneWrapper:
     """
     State of one heating zone (a room with a TRV).
@@ -92,6 +99,7 @@ class ZoneWrapper:
     def __init__(self, entity_id: str, name: str, floor_area_m2: float = 0.0,
                  is_high_priority: bool = True, trv_position_entity_id: Optional[str] = None,
                  temp_calib_entity_id: Optional[str] = None, ext_temp_entity_id: Optional[str] = None,
+                 boost_entity_id: Optional[str] = None,
                  my_master_controller: Optional['MasterController'] = None) -> None:
         self.entity_id = entity_id
         self.name = name
@@ -117,6 +125,11 @@ class ZoneWrapper:
         self.position_available = True    # False while the position sensor is unavailable/unknown
         self.opening_falling = False      # last position report was lower than the one before
         self.is_demanding_heat = False
+
+        # TRV boost (the TRV opens fully by itself for a few minutes): a heat request, whatever the temperatures.
+        # Default entity: switch.<climate object id>_boost_heating (Zigbee2MQTT naming)
+        self.boost_entity_id = boost_entity_id or default_boost_entity_id(entity_id)
+        self.boosted = False
 
         # 'heating' / 'cooling' / 'idle' - updated only from valve movement, see update_trv_opening()
         self.heating_status = 'idle'
@@ -151,8 +164,13 @@ class ZoneWrapper:
 
     @property
     def counts_as_high_priority(self) -> bool:
-        """A zone held by switch asks for heat on its own, whatever its configured priority."""
-        return self.is_high_priority or HOLD_SWITCH in self.hold_since
+        """A zone held by switch or boosted asks for heat on its own, whatever its configured priority."""
+        return self.is_high_priority or HOLD_SWITCH in self.hold_since or self.boosted
+
+    def set_boosted(self, boosted: bool) -> None:
+        """TRV boost switched on/off (an unavailable switch counts as off)."""
+        self.boosted = boosted
+        self._update_demand_metric()
 
     def set_hold(self, reason: str, active: bool, now: float) -> bool:
         """
@@ -380,13 +398,13 @@ class ZoneWrapper:
         """Recalculate is_demanding_heat from priority, temperature error and valve state."""
         if self.counts_as_high_priority:
             cooling = self.heating_status == 'cooling' and not self.held
-            self.is_demanding_heat = self.current_error > 0 or cooling
+            self.is_demanding_heat = self.current_error > 0 or cooling or self.boosted
         else:
             self.is_demanding_heat = self.effective_opening >= LOW_PRIORITY_MIN_OPENING
 
     def get_demand_metric(self) -> float:
-        """Demand 0.0-1.0 = effective opening fraction, or 0.0 if the zone is at/above target."""
-        if self.current_error <= 0.0:
+        """Demand 0.0-1.0 = effective opening fraction, or 0.0 if the zone is at/above target (a boost ignores that)."""
+        if self.current_error <= 0.0 and not self.boosted:
             return 0.0
         return max(0.0, min(1.0, self.effective_opening / 100.0))
 
@@ -405,6 +423,7 @@ class ZoneWrapper:
             "trv_opening_percent": round(self.measured_opening, 1),
             "effective_opening_percent": round(self.effective_opening, 1),
             "held": self.held,
+            "boosted": self.boosted,
             "hold_reasons": sorted(self.hold_since),
             "temperature_offset": round(self.temperature_offset, 1),
             "applied_offset": round(self.applied_offset(), 1),
