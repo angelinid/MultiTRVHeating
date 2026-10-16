@@ -133,6 +133,11 @@ class MasterController:
                 ext_temp_entity_id=config.get('ext_temp_entity_id'),
             )
             self.zones[zone.entity_id] = zone
+            zone.boost_entity_id = config.get('boost_entity_id') or self._find_boost_switch(zone.entity_id)
+            if zone.boost_entity_id:
+                zone.boost_reader = lambda eid=zone.boost_entity_id: self._switch_is_on(eid)
+            else:
+                _LOGGER.warning("Zone '%s': no boost switch found on its device - boost is not detected", zone.name)
             _LOGGER.info(
                 "Registered zone '%s' (%s, area=%.1f m², priority=%s, position_sensor=%s, "
                 "calib_entity=%s, external_temp=%s)",
@@ -155,6 +160,26 @@ class MasterController:
         self.monitored_boost_switches = [
             z.boost_entity_id for z in self.zones.values() if z.boost_entity_id
         ]
+
+    def _find_boost_switch(self, climate_entity_id: str) -> Optional[str]:
+        """The 'Boost heating' switch on the same device as the climate entity (entity registry)."""
+        try:
+            from homeassistant.helpers import entity_registry as er
+            registry = er.async_get(self.hass)
+            entry = registry.async_get(climate_entity_id)
+            if entry is None or not entry.device_id:
+                return None
+            for other in er.async_entries_for_device(registry, entry.device_id):
+                if other.domain == "switch" and "boost" in (other.original_name or other.entity_id).lower():
+                    return other.entity_id
+        except Exception:  # registry not available (tests) or lookup failed
+            pass
+        return None
+
+    def _switch_is_on(self, entity_id: str) -> bool:
+        states = getattr(self.hass, "states", None)
+        state = states.get(entity_id) if states is not None else None
+        return state is not None and state.state == "on"
 
     def now(self) -> float:
         """Controller clock (monotonic seconds)."""
@@ -221,9 +246,7 @@ class MasterController:
                     zone.update_external_temperature(value)
             if zone.temp_calib_entity_id:
                 zone.update_device_offset(self._parse_state(states.get(zone.temp_calib_entity_id)))
-            if zone.boost_entity_id:
-                boost = states.get(zone.boost_entity_id)
-                zone.set_boosted(boost is not None and boost.state == "on")
+            zone.refresh_demand()
 
     @staticmethod
     def _parse_state(state) -> Optional[float]:
@@ -304,14 +327,11 @@ class MasterController:
     async def _async_boost_change(self, event) -> None:
         """TRV boost switch changed: a boosted zone is a heat request."""
         entity_id = event.data.get('entity_id')
-        new_state = event.data.get('new_state')
         zone = self._zone_for_sensor('boost_entity_id', entity_id)
 
         if zone:
-            boosted = new_state is not None and new_state.state == "on"
-            if boosted != zone.boosted:
-                _LOGGER.info("Zone '%s': boost %s", zone.name, "on" if boosted else "off")
-            zone.set_boosted(boosted)
+            _LOGGER.info("Zone '%s': boost %s", zone.name, "on" if zone.boosted else "off")
+            zone.refresh_demand()
             await self._calculate_and_command()
 
     async def _async_tick(self, _now=None) -> None:

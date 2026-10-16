@@ -51,8 +51,8 @@ The valve is the existing "Discharge TRV" select.
 
 ## Boost is a heat request (v1.2.4)
 
-A TRV boost (`switch.<climate>_boost_heating` in Zigbee2MQTT naming, derived from the climate
-entity id; unavailable/unknown counts as off) makes its zone demand heat whatever the temperatures:
+A TRV boost (the "Boost heating" switch on the same device as the climate entity, found through the
+entity registry; read live from the switch, unavailable/unknown/missing counts as off) makes its zone demand heat whatever the temperatures:
 the zone counts as high priority while boosted, `is_demanding_heat` is true and its demand is the
 measured opening / 100 (ignoring the "room above target" rule). A boosted valve at 100 % therefore
 asks for the full flow request (60 °C, Nest offset +5). The zone is not part of pre-heating.

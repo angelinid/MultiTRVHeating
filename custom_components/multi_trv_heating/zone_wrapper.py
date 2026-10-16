@@ -24,7 +24,7 @@ SOFTWARE.
 
 import logging
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 try:
     from .const import LOGGER_NAME
@@ -57,13 +57,6 @@ TRV_REPORTS_CALIBRATED_TEMP = True
 # Hold reasons: why a zone's valve is being forced open
 HOLD_SWITCH = "switch"   # User/schedule asked for it (e.g. a child's room overnight)
 HOLD_AUTO = "auto"       # Keep-open controller: never leave every valve closed
-
-
-def default_boost_entity_id(climate_entity_id: Optional[str]) -> Optional[str]:
-    """switch.<name>_boost_heating for climate.<name> (None if the id has no climate prefix)."""
-    if climate_entity_id and climate_entity_id.startswith("climate."):
-        return f"switch.{climate_entity_id.split('.', 1)[1]}_boost_heating"
-    return None
 
 
 class ZoneWrapper:
@@ -127,9 +120,9 @@ class ZoneWrapper:
         self.is_demanding_heat = False
 
         # TRV boost (the TRV opens fully by itself for a few minutes): a heat request, whatever the temperatures.
-        # Default entity: switch.<climate object id>_boost_heating (Zigbee2MQTT naming)
-        self.boost_entity_id = boost_entity_id or default_boost_entity_id(entity_id)
-        self.boosted = False
+        # The controller finds the device's boost switch; we read its state live (no copy kept here).
+        self.boost_entity_id = boost_entity_id
+        self.boost_reader: Optional[Callable[[], bool]] = None
 
         # 'heating' / 'cooling' / 'idle' - updated only from valve movement, see update_trv_opening()
         self.heating_status = 'idle'
@@ -167,9 +160,13 @@ class ZoneWrapper:
         """A zone held by switch or boosted asks for heat on its own, whatever its configured priority."""
         return self.is_high_priority or HOLD_SWITCH in self.hold_since or self.boosted
 
-    def set_boosted(self, boosted: bool) -> None:
-        """TRV boost switched on/off (an unavailable switch counts as off)."""
-        self.boosted = boosted
+    @property
+    def boosted(self) -> bool:
+        """TRV boost switch is on right now (unavailable/unknown/missing counts as off)."""
+        return bool(self.boost_reader and self.boost_reader())
+
+    def refresh_demand(self) -> None:
+        """Recompute the demand after something it reads live (the boost switch) changed."""
         self._update_demand_metric()
 
     def set_hold(self, reason: str, active: bool, now: float) -> bool:

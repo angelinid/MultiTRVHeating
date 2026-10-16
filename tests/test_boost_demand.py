@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'custom_components' / 'mul
 sys.path.insert(0, str(Path(__file__).parent))
 
 from sim_house import SimHouse
-from zone_wrapper import default_boost_entity_id
 from master_controller import demand_to_flow_temp
 
 MINUTE = 60
@@ -42,10 +41,41 @@ class BoostDemandTests:
             self.failed += 1
             print(f"    ✗ {message}")
 
-    async def test_01_entity_id_derivation(self):
-        print("\nTest 1: Boost switch entity derived from the climate entity")
-        self.verify(default_boost_entity_id('climate.radiator_1_bedroom') == 'switch.radiator_1_bedroom_boost_heating', "Z2M naming")
-        self.verify(default_boost_entity_id('sensor.foo') is None and default_boost_entity_id(None) is None, "no climate prefix -> none")
+    async def test_01_boost_switch_found_through_the_entity_registry(self):
+        print("\nTest 1: Boost switch is the 'Boost heating' switch on the climate entity's device")
+        import types
+        from collections import namedtuple
+        Entry = namedtuple('Entry', 'entity_id domain device_id original_name')
+        entries = [
+            Entry('climate.radiator_x', 'climate', 'dev1', None),
+            Entry('sensor.some_other_name_countdown', 'sensor', 'dev1', 'Duration'),
+            Entry('switch.some_other_name', 'switch', 'dev1', 'Boost heating'),
+            Entry('climate.radiator_y', 'climate', 'dev2', None),
+        ]
+
+        class Registry:
+            def async_get(self, eid):
+                return next((e for e in entries if e.entity_id == eid), None)
+        er = types.ModuleType('homeassistant.helpers.entity_registry')
+        er.async_get = lambda hass: Registry()
+        er.async_entries_for_device = lambda reg, dev: [e for e in entries if e.device_id == dev]
+        saved = {k: sys.modules.get(k) for k in ('homeassistant', 'homeassistant.helpers', 'homeassistant.helpers.entity_registry')}
+        ha, helpers = types.ModuleType('homeassistant'), types.ModuleType('homeassistant.helpers')
+        helpers.entity_registry = er
+        sys.modules.update({'homeassistant': ha, 'homeassistant.helpers': helpers, 'homeassistant.helpers.entity_registry': er})
+        try:
+            s = house()
+            c = await s.start()
+            self.verify(c._find_boost_switch('climate.radiator_x') == 'switch.some_other_name', "found by device, whatever the names")
+            self.verify(c._find_boost_switch('climate.radiator_y') is None, "device without a boost switch -> none")
+            self.verify(c._find_boost_switch('climate.unknown') is None, "unknown entity -> none")
+            s.close()
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
 
     async def test_02_boost_in_a_satisfied_low_priority_room_starts_the_boiler(self):
         print("\nTest 2: Boost in a room above target (low priority) - boiler on, full demand")

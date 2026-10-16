@@ -173,6 +173,7 @@ class SimHouse:
                 'entity_id': v.climate_id, 'name': v.key.title(), 'area': 20.0,
                 'is_high_priority': v.priority_high,
                 'trv_position_entity_id': v.pos_id, 'temp_calib_entity_id': v.calib_id,
+                'boost_entity_id': v.boost_id,
             }
             if v.ext_id:
                 cfg['ext_temp_entity_id'] = v.ext_id
