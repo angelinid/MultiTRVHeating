@@ -85,7 +85,7 @@ class BoostDemandTests:
         s.close()
 
     async def test_05_boost_ends(self):
-        print("\nTest 5: Boost ends - valve closes, boiler stops")
+        print("\nTest 5: Boost ends - valve closes, boiler stops, never unsafe")
         s = house()
         c = await s.start()
         await s.run(10 * MINUTE)
@@ -96,6 +96,8 @@ class BoostDemandTests:
         self.verify(s.valves['kitchen'].position == 0, "valve closed")
         self.verify(c.current_flow_temp == 0, "boiler request back to 0")
         self.verify(not c.zones['climate.kitchen'].boosted, "zone no longer boosted")
+        runs = s.violation_runs()
+        self.verify(not runs, f"pump never circulates with every valve shut (runs {runs[:3]})")
         s.close()
 
     async def test_06_unavailable_or_missing_switch_is_not_a_boost(self):
@@ -115,6 +117,30 @@ class BoostDemandTests:
         s = house()
         c = await s.start(prep=lambda: s._set(s.valves['kitchen'].boost_id, 'on'))
         self.verify(c.zones['climate.kitchen'].boosted, "zone seeded as boosted")
+        s.close()
+
+    async def test_08_hold_unaffected_by_boost(self):
+        print("\nTest 8: Keep-open hold stays while another zone is boosted")
+        s = house()
+        c = await s.start()
+        await s.run(10 * MINUTE)
+        await s.set_boost('kitchen', True)
+        await s.run(5 * MINUTE)
+        self.verify(s.valves['leo'].position > 0, "keep-open valve still open")
+        s.close()
+
+    async def test_09_boost_ending_never_leaves_every_valve_shut_while_pumping(self):
+        print("\nTest 9: Boost ends right after the boiler ran - the held valve covers the pump overrun")
+        s = house()
+        c = await s.start()
+        await s.run(10 * MINUTE)
+        await s.set_boost('kitchen', True)
+        await s.run(5 * MINUTE)
+        await s.set_boost('kitchen', False)
+        await s.run(10 * MINUTE)
+        self.verify(s.valves['leo'].position == 100, "keep-open valve fully open after the boost")
+        runs = s.violation_runs()
+        self.verify(not runs, f"no unsafe period (runs {runs[:3]})")
         s.close()
 
     async def run_all_tests(self):
