@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from sim_house import SimHouse
 from zone_wrapper import HOLD_AUTO, HOLD_SWITCH, HOLD_TEMP_OFFSET
-from keep_open import BOILER_PUMP_OVERRUN, MIN_HOLD_SECONDS, CONFIRM_TIMEOUT
+from keep_open import BOILER_PUMP_OVERRUN, CONFIRM_TIMEOUT
 
 HOUR = 3600
 MINUTE = 60
@@ -222,16 +222,16 @@ class KeepOpenSafetyTests:
         self.no_violations(s)
         s.close()
 
-    async def test_07_hold_released_in_the_morning_other_valve_takes_over(self):
-        print("\nTest 7: Hold released - the keep-open valve takes over before the room valve closes")
+    async def test_07_room_hold_does_not_change_the_permanent_keep_open_hold(self):
+        print("\nTest 7: A room hold (switch) comes and goes - the keep-open valve stays held throughout")
         s = standard_house(discharge='bath', leo=(20.5, 19.0))
         c = await s.start()
         await c.async_set_zone_hold(c.zones['climate.leo'], HOLD_SWITCH, True)
         await s.run(2 * HOUR)
-        self.verify(not c.zones['climate.bath'].held, "keep-open valve not held while the room hold provides the flow")
+        self.verify(c.zones['climate.bath'].has_hold(HOLD_AUTO), "keep-open valve held while the room hold provides flow too")
         await c.async_set_zone_hold(c.zones['climate.leo'], HOLD_SWITCH, False)
         await s.run(40 * MINUTE)
-        self.verify(s.valves['bath'].position == 100, "keep-open valve now open")
+        self.verify(s.valves['bath'].position == 100, "keep-open valve open")
         self.verify(s.valves['leo'].position == 0 and s.valves['leo'].calibration == 0.0, "room valve released")
         self.no_violations(s)
         s.close()
@@ -364,16 +364,23 @@ class KeepOpenSafetyTests:
         self.verify(len(s.violations) <= 5, f"unsafe time limited to the actuator race ({len(s.violations)}s)")
         s.close()
 
-    async def test_16_min_hold_time(self):
-        print("\nTest 16: Hold lasts at least the minimum time even if another valve opens right away")
+    async def test_16_heat_request_elsewhere_never_releases_the_hold(self):
+        print("\nTest 16: A heat request from another valve never releases the hold")
         s = standard_house()
         c = await s.start()
-        await s.run(20)
+        await s.run(10 * MINUTE)
         s.valves['living'].setpoint = 24.0
         s.valves['living'].room.temp = 18.0   # living opens fully
         zone = c.zones['climate.leo']
-        await s.run(int(MIN_HOLD_SECONDS) - 10)
-        self.verify(zone.has_hold(HOLD_AUTO), "hold still in place before the minimum time")
+        seen_released = []
+        for _ in range(60):
+            await s.run(30)
+            if not zone.has_hold(HOLD_AUTO):
+                seen_released.append(s.t)
+        self.verify(s.valves['living'].position == 100, "the other valve is fully open")
+        self.verify(not seen_released, f"hold never released while another valve heats ({seen_released[:3]})")
+        self.verify(s.valves['leo'].position == 100 and s.valves['leo'].calibration == HOLD_TEMP_OFFSET, "held valve still open")
+        self.no_violations(s)
         s.close()
 
     async def test_17_flapping_neighbour_does_not_flap_hold(self):
@@ -518,6 +525,87 @@ class KeepOpenSafetyTests:
         self.verify(len(s.violations) <= 5, f"no more than the actuator race ({len(s.violations)}s)")
         s.close()
 
+    async def test_23e_handover_keeps_old_hold_until_new_valve_is_confirmed(self):
+        print("\nTest 23e: Handover - the old valve is released only after the new one has the offset and is open")
+        s = standard_house(discharge='leo', others=(20.5, 19.0))
+        for v in s.valves.values():
+            v.step_seconds = 40                      # slow actuators
+        s.zigbee_delay = 20
+        c = await s.start()
+        await s.run(15 * MINUTE)
+        old, new = c.zones['climate.leo'], c.zones['climate.bath']
+        await c.async_set_keep_open_valve('climate.bath', 'Bath')
+        new_confirmed_at = old_released_at = None
+        no_hold_open = []
+        for _ in range(30 * 60):
+            await s.run(1)
+            nv = s.valves['bath']
+            if new_confirmed_at is None and nv.calibration == HOLD_TEMP_OFFSET and nv.position > 50:
+                new_confirmed_at = s.t
+            if old_released_at is None and not old.has_hold(HOLD_AUTO):
+                old_released_at = s.t
+            if not any(s.valves[k].position > 0 for k in ('leo', 'bath')):
+                no_hold_open.append(s.t)
+        self.verify(new_confirmed_at is not None and old_released_at is not None, "handover completed")
+        self.verify(old_released_at >= new_confirmed_at, f"old released ({old_released_at}) not before the new valve was confirmed ({new_confirmed_at})")
+        self.verify(not no_hold_open, f"one of the two valves was open at every second ({no_hold_open[:3]})")
+        self.no_violations(s)
+        s.close()
+
+    async def test_23f_new_valve_never_confirms_old_hold_is_kept(self):
+        print("\nTest 23f: New valve stuck - the old hold is kept and a warning is logged")
+        import logging
+        records = []
+
+        class Catch(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+        logger = logging.getLogger('don_controller')
+        handler = Catch()
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            s = standard_house(discharge='leo', others=(20.5, 19.0))
+            c = await s.start()
+            await s.run(10 * MINUTE)
+            s.valves['bath'].stuck = True
+            await c.async_set_keep_open_valve('climate.bath', 'Bath')
+            await s.run(30 * MINUTE)
+            self.verify(c.zones['climate.leo'].has_hold(HOLD_AUTO) and s.valves['leo'].position == 100, "old valve still held and open")
+            self.verify(any('not confirmed open' in r or 'has not opened' in r for r in records), f"a warning explains it ({records[:3]})")
+            self.no_violations(s)
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(logging.CRITICAL)
+            s.close()
+
+    async def test_23g_frost_setpoint_logged(self):
+        print("\nTest 23g: Held valve with a setpoint too low to open at the hold offset - logged with the reason")
+        import logging
+        records = []
+
+        class Catch(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+        logger = logging.getLogger('don_controller')
+        handler = Catch()
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+        try:
+            s = standard_house(discharge='leo', others=(20.5, 19.0))
+            s.valves['bath'].setpoint = 5.0           # frost setpoint: -9 does not make the reading drop below it
+            c = await s.start()
+            await s.run(10 * MINUTE)
+            await c.async_set_keep_open_valve('climate.bath', 'Bath')
+            await s.run(10 * MINUTE)
+            self.verify(any('raise the setpoint' in r for r in records), f"warning names the low setpoint ({records[:3]})")
+            self.verify(c.zones['climate.leo'].has_hold(HOLD_AUTO), "old hold kept")
+            self.no_violations(s)
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(logging.CRITICAL)
+            s.close()
+
     async def test_24_feature_disabled(self):
         print("\nTest 24: No keep-open valve selected - nothing is held, interlock still applies")
         s = standard_house(discharge=None, others=(16.5, 19.0))
@@ -637,6 +725,28 @@ class KeepOpenSafetyTests:
     # ------------------------------------------------------------------
     # Fuzz
     # ------------------------------------------------------------------
+
+    async def test_27e_boosted_valve_in_a_satisfied_room_does_not_release_the_hold(self):
+        print("\nTest 27e: A boosted valve (room above target) is not a heat request - the hold stays")
+        s = standard_house()
+        c = await s.start()
+        await s.run(10 * MINUTE)
+        leo = s.valves['leo']
+        self.verify(leo.position == 100 and leo.calibration == HOLD_TEMP_OFFSET, "hold is on and open before the boost")
+        writes_before = len(s.writes_for('leo'))
+
+        s.valves['kitchen'].force_target = 100.0        # boost: valve fully open, room is at 20.5 vs 19
+        await s.run(5 * MINUTE)
+        self.verify(s.valves['kitchen'].position == 100, "boosted valve is fully open")
+        self.verify(c.zones['climate.leo'].has_hold(HOLD_AUTO), "keep-open hold is still engaged")
+        self.verify(leo.calibration == HOLD_TEMP_OFFSET and leo.position == 100, "held valve stays open")
+        self.verify(len(s.writes_for('leo')) == writes_before, "no calibration write to the held valve")
+
+        s.valves['kitchen'].force_target = 0.0          # boost off: the valve shuts at once
+        await s.run(5 * MINUTE)
+        self.verify(leo.position == 100, "held valve was open the whole time")
+        self.no_violations(s)
+        s.close()
 
     async def test_28_fuzz(self):
         print("\nTest 28: Randomised houses (setpoint changes, holds, failures, restarts)")

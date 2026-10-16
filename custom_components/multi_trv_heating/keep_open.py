@@ -27,50 +27,41 @@ from typing import TYPE_CHECKING, Optional
 
 try:
     from .const import LOGGER_NAME
-    from .zone_wrapper import HOLD_AUTO, ZoneWrapper
+    from .zone_wrapper import HOLD_AUTO, HOLD_TEMP_OFFSET, ZoneWrapper
 except ImportError:
     from const import LOGGER_NAME
-    from zone_wrapper import HOLD_AUTO, ZoneWrapper
+    from zone_wrapper import HOLD_AUTO, HOLD_TEMP_OFFSET, ZoneWrapper
 
 if TYPE_CHECKING:
     from .master_controller import MasterController
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
-# Valves move in 25 % steps. The boiler turns on when the openings add up to 100 %.
-ENGAGE_MAX_OPENING = 25.0      # Engage when no other valve is open more than this ...
-ENGAGE_MAX_SUM = 100.0         # ... and the other openings add up to less than this
-RELEASE_OPENING = 50.0         # Release when another valve is at least this open (or the sum is 100 %)
-CLOSING_ENGAGE_OPENING = 25.0  # A valve closing at or below this counts as closed
-
 # The boiler pump keeps circulating for about this long after the boiler is told to stop.
 BOILER_PUMP_OVERRUN = 300.0
 
-# Actuators are slow and finish a travel before taking the next command, so do not flap:
-MIN_HOLD_SECONDS = 30.0        # a hold lasts at least this long
-RELEASE_SETTLE = 150.0         # a just-released valve is still closing: do not count it as open
-CONFIRM_TIMEOUT = 180.0        # held valve still shut after this long: hold another one as well
-RELEASE_STABLE_SECONDS = 30.0  # other valves must keep providing flow this long before a release
+# A held valve counts as confirmed once its calibration is on the device and it is open more than this
+CONFIRM_OPENING = 50.0
+# Held valve still not confirmed after this long (stuck, flat battery, offline, setpoint too low)
+CONFIRM_TIMEOUT = 180.0
 
 
 class KeepOpenController:
     """
-    Never leave every valve closed: hold one valve open (via the TRV calibration offset).
+    Never leave every valve closed: the selected "discharge" valve is held open permanently
+    (via the TRV calibration offset), whatever the other valves or the boiler are doing. A heat
+    request elsewhere never releases it, so a valve is always open for the pump, including the
+    BOILER_PUMP_OVERRUN after the boiler stops. The room of the held valve is allowed to get warmer
+    than its target while the boiler runs.
 
-    Whenever the other valves are about to close - none open more than ENGAGE_MAX_OPENING (a valve
-    already closing at CLOSING_ENGAGE_OPENING or less counts as closed) and their openings adding up to less than
-    ENGAGE_MAX_SUM - the selected "discharge" valve is held
-    open. This is independent of the boiler state, so a valve is already open when the boiler
-    stops and the pump (which overruns for BOILER_PUMP_OVERRUN) always has somewhere to push water.
+    The hold only moves when the selected valve changes (or a fallback is needed). It is a
+    handover: the new valve is held first and the old one stays held until the new one is
+    *confirmed* - calibration offset applied on the device and the valve open more than
+    CONFIRM_OPENING. If the new valve is not confirmed within CONFIRM_TIMEOUT the old hold is kept
+    and a warning is logged.
 
-    The hold is released when other valves provide the flow (one at least RELEASE_OPENING open, or
-    the openings adding up to ENGAGE_MAX_SUM) continuously for RELEASE_STABLE_SECONDS, but never
-    earlier than MIN_HOLD_SECONDS after it started and never within BOILER_PUMP_OVERRUN of a boiler
-    stop (a heat request that turns the boiler on again ends that window). A neighbour valve that
-    keeps flapping faster than RELEASE_STABLE_SECONDS therefore does not flap the hold.
-
-    If the held valve has not opened after CONFIRM_TIMEOUT (stuck, flat battery, offline), the next
-    usable valve is held as well. All decisions use *measured* openings.
+    If no held valve is confirmed after CONFIRM_TIMEOUT (stuck, flat battery, offline), the next
+    usable valve is held as well. All decisions use *measured* values.
     """
 
     def __init__(self, controller: "MasterController",
@@ -82,7 +73,8 @@ class KeepOpenController:
 
         self.engaged_at: Optional[float] = None       # controller clock, first auto hold of this episode
         self.last_escalation_at: Optional[float] = None
-        self.release_ok_since: Optional[float] = None   # other valves have been providing flow since
+        self.handover_since: Optional[float] = None    # selected valve held but not yet confirmed
+        self._warned_handover = False                   # "not confirmed" already logged for this handover
         self._warned_unholdable = False                 # "no valve can be held" already logged this episode
         self.last_reason = "idle"
         _LOGGER.debug(
@@ -127,8 +119,18 @@ class KeepOpenController:
     # Decision
     # ------------------------------------------------------------------
 
+    def confirmed(self, zone: ZoneWrapper) -> bool:
+        """The hold really works on this valve: offset on the device and the valve open."""
+        return (
+            zone.has_hold(HOLD_AUTO)
+            and zone.position_available
+            and zone.device_offset == HOLD_TEMP_OFFSET
+            and not zone.offset_in_flight
+            and zone.measured_opening > CONFIRM_OPENING
+        )
+
     def update(self, now: float) -> bool:
-        """Engage / release holds from the measured openings. Returns True if a hold changed."""
+        """Engage / hand over holds. Returns True if a hold changed."""
         ctl = self.controller
         zones = list(ctl.zones.values())
         auto = [z for z in zones if z.has_hold(HOLD_AUTO)]
@@ -140,75 +142,66 @@ class KeepOpenController:
             for zone in auto:
                 changed |= self._release(zone, now, "feature disabled")
             self.engaged_at = None
+            self.handover_since = None
             self.last_reason = "disabled"
             return changed
-
-        # Valves providing flow independently of us: not auto-held (or switch-held), not still closing
-        anchors = [
-            z for z in zones
-            if (not z.has_hold(HOLD_AUTO) or z.held and z.hold_since.keys() - {HOLD_AUTO})
-            and not z.recently_released(now, RELEASE_SETTLE)
-        ]
-        # Actuators need time to open: a valve already closing at or below CLOSING_ENGAGE_OPENING
-        # counts as closed, so the hold starts well before the last valve is shut.
-        anchor_max = max((z.flow_opening(CLOSING_ENGAGE_OPENING) for z in anchors), default=0.0)
-        anchor_sum = sum(z.flow_opening(CLOSING_ENGAGE_OPENING) for z in anchors)
-        need = anchor_max <= ENGAGE_MAX_OPENING and anchor_sum < ENGAGE_MAX_SUM
-        can_release = anchor_max >= RELEASE_OPENING or anchor_sum >= ENGAGE_MAX_SUM
-        overrun = ctl.pump_overrun_active(now)
-
-        if can_release:
-            if self.release_ok_since is None:
-                self.release_ok_since = now
-        else:
-            self.release_ok_since = None
-        stable = self.release_ok_since is not None and now - self.release_ok_since >= RELEASE_STABLE_SECONDS
 
         if not auto:
             self.engaged_at = None
             self.last_escalation_at = None
-            if need:
-                changed |= self._engage_first_usable(now, f"other valves max {anchor_max:.0f}%, sum {anchor_sum:.0f}%")
-            else:
-                self._warned_unholdable = False
-                self.last_reason = "other valves open"
-            return changed
+            self.handover_since = None
+            return self._engage_first_usable(now, "no valve held")
 
         # --- holds exist ---
-        if can_release and stable and not overrun:
-            for zone in auto:
-                if zone.hold_age(HOLD_AUTO, now) >= MIN_HOLD_SECONDS:
-                    changed |= self._release(zone, now, f"other valves open (max {anchor_max:.0f}%, sum {anchor_sum:.0f}%)")
-            if not any(z.has_hold(HOLD_AUTO) for z in zones):
-                self.engaged_at = None
-                self.last_escalation_at = None
-            return changed
-
-        self.last_reason = "pump overrun" if (can_release and overrun) else "holding"
-
-        # The selected valve was changed while holding: hold the new one too; the old one is
-        # released below once the new one is measured open
+        # The selected valve was changed (or came back): hold it too; the old hold stays until it is confirmed
         if not primary.has_hold(HOLD_AUTO) and self._usable(primary) and primary.position_available:
             changed |= self._engage(primary, now, "selected valve changed")
+            self.handover_since = now
+            self._warned_handover = False
+
+        held_zones = [z for z in zones if z.has_hold(HOLD_AUTO)]
+        viable = [z for z in held_zones if self._usable(z) and z.position_available]
+        any_confirmed = any(self.confirmed(z) for z in viable)
+
+        if primary.has_hold(HOLD_AUTO) and self.confirmed(primary):
+            self.handover_since = None
+            self.last_reason = "holding"
+            for zone in auto:
+                if zone is not primary:
+                    changed |= self._release(zone, now, "selected valve is confirmed open")
+            return changed
+
+        self.last_reason = "holding"
+
+        if self.handover_since is None and primary.has_hold(HOLD_AUTO) and len(held_zones) > 1:
+            self.handover_since = now
+
+        # The selected valve is held but not confirmed: say why once the timeout passed
+        if (primary.has_hold(HOLD_AUTO) and self.handover_since is not None and not self._warned_handover
+                and now - self.handover_since >= CONFIRM_TIMEOUT):
+            self._warned_handover = True
+            _LOGGER.warning("Keep-open: '%s' is not confirmed open after %.0f s (%s), keeping the other hold",
+                            primary.name, CONFIRM_TIMEOUT, self._why_not_open(primary))
 
         # A held valve that cannot be driven (offline, calibration entity unavailable) is no use:
         # hold another one at once. One that is merely slow gets CONFIRM_TIMEOUT to open.
-        held_zones = [z for z in zones if z.has_hold(HOLD_AUTO)]
-        viable = [z for z in held_zones if self._usable(z) and z.position_available]
-        held_open = any(z.measured_opening > 0 for z in viable)
-        if need and not viable:
+        if not viable:
             changed |= self._escalate(now, "held valve unavailable")
-        elif need and not held_open and self.engaged_at is not None:
+        elif not any_confirmed and self.engaged_at is not None:
             reference = max(self.engaged_at, self.last_escalation_at or 0.0)
             if now - reference >= CONFIRM_TIMEOUT:
-                changed |= self._escalate(now, f"held valve has not opened after {CONFIRM_TIMEOUT:.0f} s")
-
-        # The selected valve is open now: fallbacks are no longer needed
-        if primary.has_hold(HOLD_AUTO) and primary.measured_opening > 0:
-            for zone in auto:
-                if zone is not primary and zone.hold_age(HOLD_AUTO, now) >= MIN_HOLD_SECONDS:
-                    changed |= self._release(zone, now, "selected valve is open")
+                changed |= self._escalate(now, f"held valve has not opened after {CONFIRM_TIMEOUT:.0f} s ({self._why_not_open(viable[0])})")
         return changed
+
+    @staticmethod
+    def _why_not_open(zone: ZoneWrapper) -> str:
+        """Best explanation for a held valve that does not open."""
+        if zone.device_offset != HOLD_TEMP_OFFSET or zone.offset_in_flight:
+            return "calibration offset not applied on the device yet"
+        if zone.trv_temp >= zone.target_temp:
+            return (f"TRV setpoint {zone.target_temp:.1f}°C is not above its reading "
+                    f"{zone.trv_temp:.1f}°C even with the {HOLD_TEMP_OFFSET:.0f}°C offset - raise the setpoint")
+        return "offset applied but the valve is not opening"
 
     def _engage(self, zone: ZoneWrapper, now: float, why: str) -> bool:
         self._warned_unholdable = False
