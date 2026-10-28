@@ -126,17 +126,18 @@ class TestHoldMode:
         z.update_device_offset(-9.0)
         self.verify(z.current_temp == 26.0, "estimate follows the device once it reports the new offset")
 
-    def test_10_write_in_flight_counts_as_applied(self):
-        print("\nTest 10: A calibration write takes effect on the reading at once")
+    def test_10_write_in_flight_changes_nothing_until_the_device_reports(self):
+        print("\nTest 10: A calibration write does not change the estimate until the device reports it (Z2M does not echo)")
         z = self.zone()
         z.update_device_offset(0.0)
         z.update_from_state(climate(20.0, 20.0))
         z.pushed_offset = -1.0
         z.offset_in_flight = True
-        z.update_from_state(climate(19.0, 20.0))      # the TRV already reads 1 °C lower
-        self.verify(z.current_temp == 20.0, "reading corrected by the offset just written, before the echo")
+        self.verify(z.applied_offset() == 0.0 and z.current_temp == 20.0, "offset written but not reported: still 0")
+        # the TRV reports its new calibration and its new reading together
         z.update_device_offset(-1.0)
-        self.verify(not z.offset_in_flight and z.current_temp == 20.0, "echo confirms it, estimate unchanged")
+        z.update_from_state(climate(19.0, 20.0))
+        self.verify(not z.offset_in_flight and z.current_temp == 20.0, "report confirms it, estimate unchanged")
 
     def run_all_tests(self):
         for name in sorted(n for n in dir(self) if n.startswith("test_")):

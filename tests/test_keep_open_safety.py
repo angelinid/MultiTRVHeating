@@ -748,6 +748,19 @@ class KeepOpenSafetyTests:
         self.no_violations(s)
         s.close()
 
+    async def test_27f_no_blind_writes_while_calibration_entities_are_unknown(self):
+        print("\nTest 27f: Right after an HA restart the calibration entities are 'unknown' - nothing is written until they report")
+        s = standard_house(discharge='leo', others=(20.5, 19.0))
+        c = await s.start(prep=lambda: [s._set(v.calib_id, 'unknown') for v in s.valves.values()])
+        await s.run(5 * MINUTE)
+        self.verify(all(not s.writes_for(k) for k in s.valves), f"no calibration written blind ({[(k, s.writes_for(k)) for k in s.valves if s.writes_for(k)]})")
+        for v in s.valves.values():
+            await s._emit(c._async_calibration_change, v.calib_id, '0.0')
+        await s.run(10 * MINUTE)
+        self.verify(s.valves['leo'].calibration == HOLD_TEMP_OFFSET, "once they report, the keep-open valve is held")
+        self.no_violations(s)
+        s.close()
+
     async def test_28_fuzz(self):
         print("\nTest 28: Randomised houses (setpoint changes, holds, failures, restarts)")
         total_runs = 0

@@ -132,7 +132,7 @@ class ZoneWrapper:
         self.temperature_offset = DEFAULT_TEMP_OFFSET      # what this zone wants on its TRV
         self.pushed_offset: Optional[float] = None         # last value we wrote (None = never)
         self.device_offset: Optional[float] = None         # last value the device reported
-        self.offset_in_flight = False                      # written, device has not confirmed it yet
+        self.offset_in_flight = False                      # written, device has not reported it yet (does not affect applied_offset)
         self.last_offset_write = -1e9                      # controller clock time of the last write
         self.drift_retries = 0                             # rewrites of a calibration the device lost
         self._policy_offset = DEFAULT_TEMP_OFFSET          # opening-based offset (no hold)
@@ -233,11 +233,11 @@ class ZoneWrapper:
 
     def applied_offset(self) -> float:
         """
-        The offset the TRV is believed to have right now. A write takes effect on the TRV's reading
-        at once, before the device reports it back, so a write in flight counts as applied.
+        The offset the TRV is applying right now: what the device last reported. The TRV reports its
+        calibration together with its temperature reading, so the two always agree. A write in flight
+        changes nothing until the device reports it (Z2M does not echo writes: optimistic is off).
+        Before the device has reported at all, fall back to what we wrote or wanted.
         """
-        if self.offset_in_flight and self.pushed_offset is not None:
-            return self.pushed_offset
         if self.device_offset is not None:
             return self.device_offset
         if self.pushed_offset is not None:

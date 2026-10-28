@@ -83,3 +83,14 @@ and shown on the sensors but the hold offset is not written to the TRVs.
 
 `trv_model.OPENING_CURVE`, `keep_open.py` constants (`CONFIRM_OPENING`, `CONFIRM_TIMEOUT`, `BOILER_PUMP_OVERRUN`),
 `zone_wrapper.HOLD_TEMP_OFFSET`, `master_controller` write throttling constants.
+
+## Calibration writes are not assumed to have applied (v1.2.6)
+
+Zigbee2MQTT is set to `optimistic: false` on the radiators, so a write is not echoed back: the
+calibration number changes only when the TRV reports it, 2-3 minutes later, in the same message as
+its new temperature reading. The effective temperature therefore removes the offset the device last
+reported (never one we only wrote). A write in flight is remembered only to avoid rewriting it
+before `ECHO_GRACE` (300 s) has passed; a write the device never reports is rewritten (up to 3 times).
+Calibration entities that are `unknown`/`unavailable` (just after an HA restart) are not written to.
+Every change of the flow request logs an INFO line with the figures behind it (room, TRV reading,
+applied offset, error, opening, demand, hold/boost per active zone).

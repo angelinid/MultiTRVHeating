@@ -63,7 +63,7 @@ TICK_SECONDS = 30
 
 # Calibration writes: the actuators are slow and battery powered.
 MIN_OFFSET_WRITE_INTERVAL = 120.0   # between non-urgent writes to one TRV
-ECHO_GRACE = 120.0                  # wait this long for the device to report a new calibration
+ECHO_GRACE = 300.0                  # wait this long for the device to report a new calibration (it takes 2-3 min)
 MAX_DRIFT_RETRIES = 3               # rewrite a calibration that does not stick this many times
 
 
@@ -117,6 +117,7 @@ class MasterController:
         self.boiler_off_at: Optional[float] = None
 
         self._interlock_active = False
+        self._last_decision: Optional[tuple] = None
         self._calc_lock = asyncio.Lock()
         self._calc_waiting = False
         self._unsubscribers: list[Callable[[], None]] = []
@@ -363,7 +364,7 @@ class MasterController:
         if states is None or not zone.temp_calib_entity_id:
             return False
         state = states.get(zone.temp_calib_entity_id)
-        return state is None or state.state == "unavailable"
+        return state is None or state.state in ("unavailable", "unknown")
 
     def pump_overrun_active(self, now: float) -> bool:
         """True while the boiler pump may still be running after the boiler was stopped."""
@@ -446,7 +447,25 @@ class MasterController:
             reason = "interlock: no open valve"
         else:
             self._interlock_active = False
+        self._log_decision(flow_temp, reason)
         return flow_temp, reason
+
+    def _log_decision(self, flow_temp: float, reason: str) -> None:
+        """INFO line with the figures behind a changed decision (flow request or reason)."""
+        key = (round(flow_temp, 1), reason)
+        if key == self._last_decision:
+            return
+        self._last_decision = key
+        parts = []
+        for z in self.zones.values():
+            if z.is_demanding_heat or z.held or z.measured_opening > 0 or z.boosted:
+                parts.append(
+                    f"{z.name}: room={z.current_temp:.1f} (trv={z.trv_temp:.1f}, offset={z.applied_offset():.0f}"
+                    f"{'*' if z.offset_in_flight else ''}) target={z.target_temp:.1f} err={z.current_error:+.1f} "
+                    f"open={z.measured_opening:.0f}% demand={z.get_demand_metric():.2f}"
+                    f"{' HELD' if z.held else ''}{' BOOST' if z.boosted else ''}"
+                )
+        _LOGGER.info("Decision: flow=%.1f°C (%s) | %s", flow_temp, reason, "; ".join(parts) or "no active zones")
 
     async def _run_cycle(self) -> None:
         if self.component_enabled is False:
