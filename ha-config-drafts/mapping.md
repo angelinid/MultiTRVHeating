@@ -10,7 +10,7 @@
 | Toilet Heat | radiator_toilet | `climate.toilet_heat_thermostat` |
 
 - MultiTRV Heat day: switch.hall_heating_priority_high - merged valves disagree ['on', 'off']; used 'on' (high priority if any)
-- MultiTRV Heat night: Hall Heating - valves disagree {'Kitchen Heat': 12, 'Hall Heating': 19}; used Hall Heating's 19
+- MultiTRV Heat night: Hall Heating - Hall was 19, Kitchen 12; set to 12 by the user.
 - Heat TRV enabled: switch.hall_heating_priority_high - merged valves disagree ['on', 'off']; used 'on' (high priority if any)
 
 ## Apply (after the v2.0.0 deploy and migration)

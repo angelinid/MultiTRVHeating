@@ -393,7 +393,7 @@
       preset_mode: manual
       state: heat
     climate.hall_heating_thermostat:
-      temperature: 19
+      temperature: 12
       preset_mode: manual
       state: heat
     climate.study_heat_thermostat:
