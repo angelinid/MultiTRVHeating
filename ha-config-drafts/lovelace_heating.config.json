@@ -44,7 +44,7 @@
           "cards": [
             {
               "type": "thermostat",
-              "entity": "climate.bedroom_1_thermostat",
+              "entity": "climate.bedroom_1_heating_thermostat",
               "name": "Bedroom 1"
             },
             {
@@ -59,7 +59,7 @@
                   "name": "Boost"
                 },
                 {
-                  "entity": "switch.bedroom_1_hold_open",
+                  "entity": "switch.bedroom_1_heating_bedroom_1_hold_open",
                   "name": "Hold open"
                 },
                 {
@@ -91,7 +91,7 @@
                   "label": "Zone"
                 },
                 {
-                  "entity": "select.bedroom_1_external_temperature_sensor",
+                  "entity": "select.bedroom_1_heating_external_temperature_sensor",
                   "name": "Room sensor"
                 }
               ]

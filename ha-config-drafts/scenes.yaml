@@ -244,7 +244,7 @@
       temperature: 18
       preset_mode: manual
       state: heat
-    climate.bedroom_1_thermostat:
+    climate.bedroom_1_heating_thermostat:
       temperature: 18
       preset_mode: manual
       state: heat
@@ -312,7 +312,7 @@
       temperature: 19
       preset_mode: manual
       state: heat
-    climate.bedroom_1_thermostat:
+    climate.bedroom_1_heating_thermostat:
       temperature: 16
       preset_mode: manual
       state: heat
@@ -380,7 +380,7 @@
       temperature: 12
       preset_mode: manual
       state: heat
-    climate.bedroom_1_thermostat:
+    climate.bedroom_1_heating_thermostat:
       temperature: 15
       preset_mode: manual
       state: heat
@@ -448,7 +448,7 @@
       temperature: 16
       preset_mode: manual
       state: heat
-    climate.bedroom_1_thermostat:
+    climate.bedroom_1_heating_thermostat:
       temperature: 18
       preset_mode: manual
       state: heat
@@ -516,7 +516,7 @@
       temperature: 16
       preset_mode: manual
       state: heat
-    climate.bedroom_1_thermostat:
+    climate.bedroom_1_heating_thermostat:
       temperature: 18
       preset_mode: manual
       state: heat
@@ -578,7 +578,7 @@
       icon: mdi:power
       friendly_name: Multi-TRV Heating Controller Component Enable
       state: 'off'
-    climate.bedroom_1_thermostat:
+    climate.bedroom_1_heating_thermostat:
       temperature: 35
       preset_mode: manual
       state: heat
@@ -659,7 +659,7 @@
       temperature: 18
       preset_mode: manual
       state: heat
-    climate.bedroom_1_thermostat:
+    climate.bedroom_1_heating_thermostat:
       temperature: 16
       preset_mode: manual
       state: heat

@@ -1,6 +1,6 @@
 | Zone | Valves | Thermostat entity |
 |---|---|---|
-| Bedroom 1 | radiator_1_bedroom, radiator_2_bedroom | `climate.bedroom_1_thermostat` |
+| Bedroom 1 | radiator_1_bedroom, radiator_2_bedroom | `climate.bedroom_1_heating_thermostat` |
 | Living Room Heating | radiator_1_living_room, radiator_tv_room | `climate.living_room_heating_thermostat` |
 | Bathroom Heating | radiator_bathroom | `climate.bathroom_heating_thermostat` |
 | Ensuite Heating | radiator_ensuite | `climate.ensuite_heating_thermostat` |
