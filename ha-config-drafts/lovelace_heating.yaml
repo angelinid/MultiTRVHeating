@@ -1,0 +1,258 @@
+views:
+- title: Home
+  cards:
+  - type: entities
+    entities:
+    - entity: climate.hall
+      name: Nest thermostat
+    - entity: sensor.aqara_temperature_sensor_temperature
+      name: Leo's room
+    - entity: sensor.tuya_temperature_sensor_temperature
+      name: Parents room
+    - entity: sensor.laundry_temperature_temperature
+  - type: horizontal-stack
+    cards:
+    - type: markdown
+      content: |-
+        {% set t = states('sensor.opentherm_flow_temperature') | float(0) %}
+        {% set f = ((t - 25) / 35) | min(1) | max(0) if t > 0 else 0 %}
+        {% set r = [510 * f, 255] | min | int %}
+        {% set g = [510 * (1 - f), 255] | min | int %}
+        {% set n = (f * 10) | round | int %}
+        <font color="{{ '#%02x%02x%02x' | format(r, g, 60) }}">**Flow {{ 'off' if t == 0 else (t | round(1) ~ ' °C') }}** {{ '▮' * n }}{{ '▯' * (10 - n) }}</font>
+    - type: tile
+      entity: select.multi_trv_heating_controller_keep_open_valve
+      name: Keep-open valve
+  - type: vertical-stack
+    cards:
+    - type: tile
+      entity: climate.living_room_heating_thermostat
+      name: Living Room Heating
+      features:
+      - type: target-temperature
+      vertical: false
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_1_living_room_battery
+        name: Battery
+      - entity: sensor.radiator_1_living_room_position
+        name: Open
+      - entity: switch.radiator_1_living_room_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+      title: Living Room Heating
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_tv_room_battery
+        name: Battery
+      - entity: sensor.radiator_tv_room_position
+        name: Open
+      - entity: switch.radiator_tv_room_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+      title: TV Room Heat
+  - type: vertical-stack
+    cards:
+    - type: tile
+      entity: climate.hall_heating_thermostat
+      name: Hall Heating
+      features:
+      - type: target-temperature
+      vertical: false
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_hall_battery
+        name: Battery
+      - entity: sensor.radiator_hall_position
+        name: Open
+      - entity: switch.radiator_hall_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+      title: Hall Heating
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_kitchen_battery
+        name: Battery
+      - entity: sensor.radiator_kitchen_position
+        name: Open
+      - entity: switch.radiator_kitchen_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+      title: Kitchen Heat
+  - type: vertical-stack
+    cards:
+    - type: tile
+      entity: climate.leos_heat_thermostat
+      name: Leos Heat
+      features:
+      - type: target-temperature
+      vertical: false
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_leo_battery
+        name: Battery
+      - entity: sensor.radiator_leo_position
+        name: Open
+      - entity: switch.radiator_leo_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+  - type: vertical-stack
+    cards:
+    - type: tile
+      entity: climate.bathroom_heating_thermostat
+      name: Bathroom Heating
+      features:
+      - type: target-temperature
+      vertical: false
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_bathroom_battery
+        name: Battery
+      - entity: sensor.radiator_bathroom_position
+        name: Open
+      - entity: switch.radiator_bathroom_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+  - type: vertical-stack
+    cards:
+    - type: tile
+      entity: climate.bedroom_1_heating_thermostat
+      name: Bedroom Heating
+      features:
+      - type: target-temperature
+      vertical: false
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_1_bedroom_battery
+        name: Battery
+      - entity: sensor.radiator_1_bedroom_position
+        name: Open
+      - entity: switch.radiator_1_bedroom_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+      title: Bedroom 1
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_2_bedroom_battery
+        name: Battery
+      - entity: sensor.radiator_2_bedroom_position
+        name: Open
+      - entity: switch.radiator_2_bedroom_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+      title: Bedroom 2 Heating
+  - type: vertical-stack
+    cards:
+    - type: tile
+      entity: climate.ensuite_heating_thermostat
+      name: Ensuite Heating
+      features:
+      - type: target-temperature
+      vertical: false
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_ensuite_battery
+        name: Battery
+      - entity: sensor.radiator_ensuite_position
+        name: Open
+      - entity: switch.radiator_ensuite_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+  - type: vertical-stack
+    cards:
+    - type: tile
+      entity: climate.study_heat_thermostat
+      name: Study Heat
+      features:
+      - type: target-temperature
+      vertical: false
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_study_battery
+        name: Battery
+      - entity: sensor.radiator_study_position
+        name: Open
+      - entity: switch.radiator_study_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+  - type: vertical-stack
+    cards:
+    - type: tile
+      entity: climate.toilet_heat_thermostat
+      name: Toilet Heat
+      features:
+      - type: target-temperature
+      vertical: false
+    - type: glance
+      columns: 3
+      show_name: true
+      show_state: true
+      state_color: true
+      entities:
+      - entity: sensor.radiator_toilet_battery
+        name: Battery
+      - entity: sensor.radiator_toilet_position
+        name: Open
+      - entity: switch.radiator_toilet_boost_heating
+        name: Boost
+        tap_action:
+          action: more-info
+  - type: history-graph
+    entities:
+    - entity: sensor.hall_temperature
+    - entity: sensor.aqara_temperature_sensor_temperature
+    - entity: sensor.tuya_temperature_sensor_temperature
+    - entity: sensor.laundry_temperature_temperature
+    hours_to_show: 48
+    refresh_interval: 5
+    title: Thermostats
