@@ -10,42 +10,44 @@ views:
     - entity: sensor.tuya_temperature_sensor_temperature
       name: Parents room
     - entity: sensor.laundry_temperature_temperature
-  - type: gauge
-    entity: sensor.opentherm_flow_temperature
-    name: Boiler flow temperature
-    min: 0
-    max: 60
-    needle: true
-    segments:
-    - from: 0
-      color: '#43a047'
-    - from: 25
-      color: '#9ccc65'
-    - from: 35
-      color: '#fdd835'
-    - from: 45
-      color: '#fb8c00'
-    - from: 55
-      color: '#e53935'
-    tap_action:
-      action: more-info
-      entity: number.multi_trv_heating_controller_flow_override
-  - type: conditional
-    conditions:
-    - condition: state
-      entity: binary_sensor.multi_trv_heating_controller_flow_override_active
-      state: 'on'
-    card:
-      type: tile
-      entity: button.multi_trv_heating_controller_cancel_flow_override
-      name: Cancel flow override
-      icon: mdi:cancel
-      vertical: false
+  - type: vertical-stack
+    cards:
+    - type: gauge
+      entity: sensor.opentherm_flow_temperature
+      name: Boiler flow temperature
+      min: 0
+      max: 60
+      needle: true
+      segments:
+      - from: 0
+        color: '#43a047'
+      - from: 25
+        color: '#9ccc65'
+      - from: 35
+        color: '#fdd835'
+      - from: 45
+        color: '#fb8c00'
+      - from: 55
+        color: '#e53935'
       tap_action:
-        action: perform-action
-        perform_action: button.press
-        target:
-          entity_id: button.multi_trv_heating_controller_cancel_flow_override
+        action: more-info
+        entity: number.multi_trv_heating_controller_flow_override
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: binary_sensor.multi_trv_heating_controller_flow_override_active
+        state: 'on'
+      card:
+        type: tile
+        entity: button.multi_trv_heating_controller_cancel_flow_override
+        name: Cancel flow override
+        icon: mdi:cancel
+        vertical: false
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.multi_trv_heating_controller_cancel_flow_override
   - type: vertical-stack
     cards:
     - type: tile
@@ -54,36 +56,38 @@ views:
       features:
       - type: target-temperature
       vertical: false
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_1_living_room_battery
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_1_living_room_position
+        name: Living Room
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_1_living_room_battery
         name: Battery
-      - entity: sensor.radiator_1_living_room_position
-        name: Open
-      - entity: switch.radiator_1_living_room_boost_heating
+        vertical: false
+      - type: tile
+        entity: switch.radiator_1_living_room_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
-      title: Living Room Heating
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_tv_room_battery
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_tv_room_position
+        name: TV Room
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_tv_room_battery
         name: Battery
-      - entity: sensor.radiator_tv_room_position
-        name: Open
-      - entity: switch.radiator_tv_room_boost_heating
+        vertical: false
+      - type: tile
+        entity: switch.radiator_tv_room_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
-      title: TV Room Heat
   - type: vertical-stack
     cards:
     - type: tile
@@ -92,36 +96,38 @@ views:
       features:
       - type: target-temperature
       vertical: false
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_hall_battery
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_hall_position
+        name: Hall
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_hall_battery
         name: Battery
-      - entity: sensor.radiator_hall_position
-        name: Open
-      - entity: switch.radiator_hall_boost_heating
+        vertical: false
+      - type: tile
+        entity: switch.radiator_hall_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
-      title: Hall Heating
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_kitchen_battery
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_kitchen_position
+        name: Kitchen
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_kitchen_battery
         name: Battery
-      - entity: sensor.radiator_kitchen_position
-        name: Open
-      - entity: switch.radiator_kitchen_boost_heating
+        vertical: false
+      - type: tile
+        entity: switch.radiator_kitchen_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
-      title: Kitchen Heat
   - type: vertical-stack
     cards:
     - type: tile
@@ -130,18 +136,20 @@ views:
       features:
       - type: target-temperature
       vertical: false
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_leo_battery
-        name: Battery
-      - entity: sensor.radiator_leo_position
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_leo_position
         name: Open
-      - entity: switch.radiator_leo_boost_heating
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_leo_battery
+        name: Battery
+        vertical: false
+      - type: tile
+        entity: switch.radiator_leo_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
   - type: vertical-stack
@@ -152,18 +160,20 @@ views:
       features:
       - type: target-temperature
       vertical: false
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_bathroom_battery
-        name: Battery
-      - entity: sensor.radiator_bathroom_position
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_bathroom_position
         name: Open
-      - entity: switch.radiator_bathroom_boost_heating
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_bathroom_battery
+        name: Battery
+        vertical: false
+      - type: tile
+        entity: switch.radiator_bathroom_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
   - type: vertical-stack
@@ -174,36 +184,38 @@ views:
       features:
       - type: target-temperature
       vertical: false
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_1_bedroom_battery
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_1_bedroom_position
+        name: Bedroom 1
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_1_bedroom_battery
         name: Battery
-      - entity: sensor.radiator_1_bedroom_position
-        name: Open
-      - entity: switch.radiator_1_bedroom_boost_heating
+        vertical: false
+      - type: tile
+        entity: switch.radiator_1_bedroom_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
-      title: Bedroom 1
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_2_bedroom_battery
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_2_bedroom_position
+        name: Bedroom 2
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_2_bedroom_battery
         name: Battery
-      - entity: sensor.radiator_2_bedroom_position
-        name: Open
-      - entity: switch.radiator_2_bedroom_boost_heating
+        vertical: false
+      - type: tile
+        entity: switch.radiator_2_bedroom_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
-      title: Bedroom 2 Heating
   - type: vertical-stack
     cards:
     - type: tile
@@ -212,18 +224,20 @@ views:
       features:
       - type: target-temperature
       vertical: false
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_ensuite_battery
-        name: Battery
-      - entity: sensor.radiator_ensuite_position
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_ensuite_position
         name: Open
-      - entity: switch.radiator_ensuite_boost_heating
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_ensuite_battery
+        name: Battery
+        vertical: false
+      - type: tile
+        entity: switch.radiator_ensuite_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
   - type: vertical-stack
@@ -234,18 +248,20 @@ views:
       features:
       - type: target-temperature
       vertical: false
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_study_battery
-        name: Battery
-      - entity: sensor.radiator_study_position
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_study_position
         name: Open
-      - entity: switch.radiator_study_boost_heating
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_study_battery
+        name: Battery
+        vertical: false
+      - type: tile
+        entity: switch.radiator_study_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
   - type: vertical-stack
@@ -256,18 +272,20 @@ views:
       features:
       - type: target-temperature
       vertical: false
-    - type: glance
-      columns: 3
-      show_name: true
-      show_state: true
-      state_color: true
-      entities:
-      - entity: sensor.radiator_toilet_battery
-        name: Battery
-      - entity: sensor.radiator_toilet_position
+    - type: horizontal-stack
+      cards:
+      - type: tile
+        entity: sensor.radiator_toilet_position
         name: Open
-      - entity: switch.radiator_toilet_boost_heating
+        vertical: false
+      - type: tile
+        entity: sensor.radiator_toilet_battery
+        name: Battery
+        vertical: false
+      - type: tile
+        entity: switch.radiator_toilet_boost_heating
         name: Boost
+        vertical: false
         tap_action:
           action: more-info
   - type: history-graph
