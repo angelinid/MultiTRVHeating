@@ -20,11 +20,19 @@ except ImportError:
     ConfigEntry = None
 
 from .const import LOGGER_NAME
-from .entity import PersistentEntityMixin, controller_device_info, get_controller
+from .entity import (
+    PersistentEntityMixin,
+    controller_device_info,
+    get_controller,
+    prefixed_unique_id,
+    zone_device_info,
+    zone_slug,
+)
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
 OPTION_OFF = "Off"
+OPTION_NO_SENSOR = "None"
 
 
 class MultiTRVHeatingSelect(PersistentEntityMixin, SelectEntity):
@@ -113,8 +121,72 @@ class DischargeTRVSelect(MultiTRVHeatingSelect):
         await self._async_persist(self._attr_current_option)
 
 
+class ZoneExternalTempSelect(MultiTRVHeatingSelect):
+    """Choose the room temperature sensor of one zone (instead of the TRV's own reading)."""
+
+    STORAGE_PREFIX = "zone_ext_temp_select"
+
+    def __init__(self, zone, controller, entry_id: Optional[str] = None,
+                 device_info: Optional[Any] = None, hass: Optional[Any] = None) -> None:
+        super().__init__(
+            name="External temperature sensor",
+            unique_id=prefixed_unique_id(entry_id, f"{zone_slug(zone.name)}_ext_temp_select"),
+            icon="mdi:thermometer",
+            device_info=device_info,
+        )
+        self.zone = zone
+        self.controller = controller
+        self.hass = hass
+        self._attr_has_entity_name = True
+
+        # A stored choice (including "none") wins over the sensor given when the zone was set up.
+        stored = self._restore_stored()
+        if stored is not None:
+            controller.set_external_sensor(zone, stored or None)
+
+    @staticmethod
+    def _label(entity_id: str, name: Optional[str]) -> str:
+        return f"{name} ({entity_id})" if name and name != entity_id else entity_id
+
+    def _temperature_sensors(self) -> dict:
+        """{label: entity_id} of the temperature sensors that exist now, plus the one in use."""
+        found = {}
+        states = self.hass.states.async_all("sensor") if self.hass else []
+        for state in states:
+            if state.attributes.get("device_class") == "temperature":
+                found[state.entity_id] = state.attributes.get("friendly_name")
+        current = self.zone.ext_temp_entity_id
+        if current and current not in found:
+            found[current] = None  # keep the selection valid even if the sensor is missing right now
+        return {self._label(eid, name): eid for eid, name in sorted(found.items())}
+
+    @property
+    def options(self) -> list:
+        return [OPTION_NO_SENSOR] + sorted(self._temperature_sensors())
+
+    @property
+    def current_option(self) -> Optional[str]:
+        current = self.zone.ext_temp_entity_id
+        if not current:
+            return OPTION_NO_SENSOR
+        for label, entity_id in self._temperature_sensors().items():
+            if entity_id == current:
+                return label
+        return current
+
+    async def async_select_option(self, option: str) -> None:
+        entity_id = None if option == OPTION_NO_SENSOR else self._temperature_sensors().get(option)
+        if option != OPTION_NO_SENSOR and entity_id is None:
+            _LOGGER.warning("Zone '%s': unknown external temperature sensor '%s'", self.zone.name, option)
+            return
+        self.controller.set_external_sensor(self.zone, entity_id)
+        await self._async_persist(entity_id or "")
+        self.async_write_ha_state()
+        await self.controller._calculate_and_command()
+
+
 class MultiTRVHeatingSelectManager:
-    """Creates all MultiTRVHeating select entities (currently just the discharge TRV)."""
+    """Creates all MultiTRVHeating select entities (the discharge TRV and one external temperature sensor per zone)."""
 
     def __init__(self, controller, entry_id: Optional[str] = None,
                  controller_device: Optional[Any] = None,
@@ -124,6 +196,13 @@ class MultiTRVHeatingSelectManager:
         self.controller_device = controller_device
         self.hass = hass
         self.select_entities = [DischargeTRVSelect(controller, entry_id, controller_device, hass)]
+        self.select_entities += [
+            ZoneExternalTempSelect(
+                zone, controller, entry_id,
+                zone_device_info(entry_id, zone_entity_id, zone.name) if entry_id else None, hass,
+            )
+            for zone_entity_id, zone in controller.zones.items()
+        ]
 
     def get_all_entities(self) -> list:
         return self.select_entities

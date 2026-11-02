@@ -334,6 +334,13 @@ class ZoneWrapper:
         _LOGGER.debug("Zone '%s': external temp=%.1f°C", self.name, self.ext_current_temp)
         self._refresh_temperature()
 
+    def set_external_sensor(self, entity_id: Optional[str]) -> None:
+        """Switch to another external sensor (or none); the old sensor's reading no longer counts."""
+        self.ext_temp_entity_id = entity_id
+        self.ext_current_temp = None
+        self.ext_last_update = 0.0
+        self._refresh_temperature()
+
     def update_device_offset(self, offset: Optional[float]) -> None:
         """The TRV's calibration entity reported a value (None = unavailable)."""
         self.device_offset = offset

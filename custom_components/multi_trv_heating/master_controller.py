@@ -121,6 +121,7 @@ class MasterController:
         self._calc_lock = asyncio.Lock()
         self._calc_waiting = False
         self._unsubscribers: list[Callable[[], None]] = []
+        self._ext_unsubscribe: Optional[Callable[[], None]] = None
 
         for config in zone_configs:
             zone = ZoneWrapper(
@@ -201,13 +202,14 @@ class MasterController:
         listeners: list[tuple[list[str], Callable]] = [
             (self.monitored_climate_entities, self._async_climate_state_change),
             (self.monitored_position_sensors, self._async_position_change),
-            (self.monitored_external_sensors, self._async_external_temp_change),
             (self.monitored_calibration_entities, self._async_calibration_change),
             (self.monitored_boost_switches, self._async_boost_change),
         ]
         for entity_ids, handler in listeners:
             if entity_ids:
                 self._unsubscribers.append(async_track_state_change_event(self.hass, entity_ids, handler))
+
+        self._subscribe_external_sensors()
 
         self._unsubscribers.append(
             async_track_time_interval(self.hass, self._async_tick, timedelta(seconds=TICK_SECONDS))
@@ -220,8 +222,39 @@ class MasterController:
             len(self.monitored_external_sensors), len(self.monitored_calibration_entities),
         )
 
+    def _subscribe_external_sensors(self) -> None:
+        """(Re)subscribe to the zones' external temperature sensors."""
+        if self._ext_unsubscribe:
+            self._ext_unsubscribe()
+            self._ext_unsubscribe = None
+        if self.monitored_external_sensors and async_track_state_change_event is not None:
+            self._ext_unsubscribe = async_track_state_change_event(
+                self.hass, self.monitored_external_sensors, self._async_external_temp_change
+            )
+
+    def set_external_sensor(self, zone: ZoneWrapper, entity_id: Optional[str]) -> None:
+        """Use `entity_id` (or none) as the zone's external temperature sensor, from now on."""
+        entity_id = entity_id or None
+        if zone.ext_temp_entity_id == entity_id:
+            return
+        _LOGGER.info("Zone '%s': external temperature sensor %s -> %s",
+                     zone.name, zone.ext_temp_entity_id or "none", entity_id or "none")
+        zone.set_external_sensor(entity_id)
+        self.monitored_external_sensors = [
+            z.ext_temp_entity_id for z in self.zones.values() if z.ext_temp_entity_id
+        ]
+        if entity_id:
+            states = getattr(self.hass, "states", None)
+            value = self._parse_state(states.get(entity_id)) if states is not None else None
+            if value is not None:
+                zone.update_external_temperature(value)
+        self._subscribe_external_sensors()
+
     async def async_stop_listening(self) -> None:
         """Unsubscribe everything (config entry unload)."""
+        if self._ext_unsubscribe:
+            self._ext_unsubscribe()
+            self._ext_unsubscribe = None
         for unsubscribe in self._unsubscribers:
             unsubscribe()
         self._unsubscribers.clear()

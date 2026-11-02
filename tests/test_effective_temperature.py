@@ -92,6 +92,21 @@ class TestEffectiveTemperature:
         self.verify(zone.current_error < 0, "above target: no demand")
         self.verify(zone.get_demand_metric() == 0.0, "demand metric is zero")
 
+    def test_7_switch_sensor(self):
+        print("\nTest 7: Switching the external sensor drops the old reading")
+        zone = self.make_zone(with_ext=True)
+        zone.update_from_state(climate_state(18.0, 20.0))
+        zone.update_external_temperature(21.0)
+        self.verify(zone.current_temp == 21.0, "the old sensor is used")
+        zone.set_external_sensor("sensor.other")
+        self.verify(zone.ext_temp_entity_id == "sensor.other", "zone points at the new sensor")
+        self.verify(zone.current_temp == 18.0, "until the new sensor reports, the TRV reading is used")
+        zone.update_external_temperature(19.5)
+        self.verify(zone.current_temp == 19.5, "the new sensor's reading is used")
+        zone.set_external_sensor(None)
+        self.verify(zone.current_temp == 18.0 and not zone.has_fresh_external_temperature(),
+                    "removing the sensor goes back to the TRV reading")
+
     def run_all_tests(self):
         for name in sorted(n for n in dir(self) if n.startswith("test_")):
             getattr(self, name)()
