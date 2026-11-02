@@ -4,6 +4,11 @@
       "title": "Home",
       "cards": [
         {
+          "type": "heading",
+          "heading": "Living Room",
+          "heading_style": "title"
+        },
+        {
           "type": "vertical-stack",
           "cards": [
             {
@@ -70,6 +75,11 @@
               ]
             }
           ]
+        },
+        {
+          "type": "heading",
+          "heading": "Hall & Kitchen",
+          "heading_style": "title"
         },
         {
           "type": "vertical-stack",
@@ -140,6 +150,11 @@
           ]
         },
         {
+          "type": "heading",
+          "heading": "Leo",
+          "heading_style": "title"
+        },
+        {
           "type": "vertical-stack",
           "cards": [
             {
@@ -182,6 +197,11 @@
           ]
         },
         {
+          "type": "heading",
+          "heading": "Bathroom",
+          "heading_style": "title"
+        },
+        {
           "type": "vertical-stack",
           "cards": [
             {
@@ -222,6 +242,11 @@
               ]
             }
           ]
+        },
+        {
+          "type": "heading",
+          "heading": "Bedrooms",
+          "heading_style": "title"
         },
         {
           "type": "vertical-stack",
@@ -292,6 +317,11 @@
           ]
         },
         {
+          "type": "heading",
+          "heading": "Ensuite",
+          "heading_style": "title"
+        },
+        {
           "type": "vertical-stack",
           "cards": [
             {
@@ -334,6 +364,11 @@
           ]
         },
         {
+          "type": "heading",
+          "heading": "Study",
+          "heading_style": "title"
+        },
+        {
           "type": "vertical-stack",
           "cards": [
             {
@@ -374,6 +409,11 @@
               ]
             }
           ]
+        },
+        {
+          "type": "heading",
+          "heading": "Toilet",
+          "heading_style": "title"
         },
         {
           "type": "vertical-stack",
