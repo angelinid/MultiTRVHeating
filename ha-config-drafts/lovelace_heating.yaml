@@ -27,6 +27,25 @@ views:
       color: '#fb8c00'
     - from: 55
       color: '#e53935'
+    tap_action:
+      action: more-info
+      entity: number.multi_trv_heating_controller_flow_override
+  - type: conditional
+    conditions:
+    - condition: state
+      entity: binary_sensor.multi_trv_heating_controller_flow_override_active
+      state: 'on'
+    card:
+      type: tile
+      entity: button.multi_trv_heating_controller_cancel_flow_override
+      name: Cancel flow override
+      icon: mdi:cancel
+      vertical: false
+      tap_action:
+        action: perform-action
+        perform_action: button.press
+        target:
+          entity_id: button.multi_trv_heating_controller_cancel_flow_override
   - type: vertical-stack
     cards:
     - type: tile

@@ -10,7 +10,8 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 try:
-    from homeassistant.components.number import NumberEntity
+    from homeassistant.components.number import NumberEntity, NumberMode
+    from homeassistant.exceptions import HomeAssistantError
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.const import UnitOfArea
     from homeassistant.core import HomeAssistant
@@ -18,12 +19,14 @@ try:
 except ImportError:
     # For testing without Home Assistant
     NumberEntity = object
+    NumberMode = None
+    HomeAssistantError = Exception
     UnitOfArea = "m²"
     HomeAssistant = None
     AddEntitiesCallback = None
     ConfigEntry = None
 
-from .const import LOGGER_NAME
+from .const import LOGGER_NAME, MAX_FLOW_TEMP, MIN_FLOW_TEMP
 from .entity import (
     PersistentEntityMixin,
     controller_device_info,
@@ -32,6 +35,7 @@ from .entity import (
     zone_device_info,
     zone_slug,
 )
+from .override import OverrideError
 from .preheating import TUNING_CONSTANT_MAX, TUNING_CONSTANT_MIN, local_now
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -55,6 +59,59 @@ class MultiTRVHeatingNumber(PersistentEntityMixin, NumberEntity):
         self._attr_native_step = step
         self._attr_device_info = device_info
         self._attr_native_value = 0.0
+
+
+class FlowOverrideNumber(NumberEntity):
+    """
+    Slider for the boiler flow override. It shows the flow the boiler is asked for now (0 = off);
+    moving it requests that flow for 15 minutes, and anything below the boiler minimum (25 °C) switches
+    the boiler off. A refusal (no open valve) is raised as an error, which Home Assistant shows as a
+    pop-up.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Flow override"
+    _attr_should_poll = False
+    _attr_icon = "mdi:water-boiler"
+    _attr_native_unit_of_measurement = "°C"
+    _attr_native_min_value = 0.0
+    _attr_native_max_value = MAX_FLOW_TEMP
+    _attr_native_step = 1.0
+
+    def __init__(self, controller, entry_id: Optional[str], device_info: Optional[Any]) -> None:
+        self.controller = controller
+        self._attr_unique_id = prefixed_unique_id(entry_id, "flow_override_number")
+        self._attr_device_info = device_info
+        if NumberMode is not None:
+            self._attr_mode = NumberMode.SLIDER
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(self.controller.add_listener(self._refresh))
+
+    def _refresh(self) -> None:
+        if self.hass is not None:
+            self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> float:
+        return self.controller.current_flow_temp
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        override = self.controller.flow_override
+        now = self.controller.now()
+        return {
+            "override": override.status(now),
+            "remaining_minutes": round(override.remaining(now) / 60, 1),
+        }
+
+    async def async_set_native_value(self, value: float) -> None:
+        try:
+            self.controller.flow_override.start(float(value), self.controller.now())
+        except OverrideError as err:
+            raise HomeAssistantError(str(err)) from err
+        await self.controller._calculate_and_command()
+        self.async_write_ha_state()
 
 
 class ZoneAreaNumber(MultiTRVHeatingNumber):
@@ -288,6 +345,7 @@ async def async_setup_entry(
         PreheatingEndTimeHour(controller, entry.entry_id, device_info, hass),
         PreheatingEndTimeMinute(controller, entry.entry_id, device_info, hass),
         PreheatingTuningNumber(controller, entry.entry_id, device_info, hass),
+        FlowOverrideNumber(controller, entry.entry_id, device_info),
     ]
     numbers.extend(
         ZoneAreaNumber(

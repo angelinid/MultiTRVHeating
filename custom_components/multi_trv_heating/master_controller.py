@@ -38,6 +38,7 @@ except ImportError:
 try:
     from .const import LOGGER_NAME, MAX_FLOW_TEMP, MIN_FLOW_TEMP
     from .keep_open import BOILER_PUMP_OVERRUN, KeepOpenController
+    from .override import FlowOverride
     from .preheating import PreheatingController
     from .zone import Zone
     from .zone_wrapper import HOLD_TEMP_OFFSET, ZoneWrapper
@@ -45,6 +46,7 @@ try:
 except ImportError:
     from const import LOGGER_NAME, MAX_FLOW_TEMP, MIN_FLOW_TEMP
     from keep_open import BOILER_PUMP_OVERRUN, KeepOpenController
+    from override import FlowOverride
     from preheating import PreheatingController
     from zone import Zone
     from zone_wrapper import HOLD_TEMP_OFFSET, ZoneWrapper
@@ -112,6 +114,8 @@ class MasterController:
         self.valve_open_delay: float = VALVE_OPEN_DELAY
 
         self.preheating = PreheatingController(self)
+        self.flow_override = FlowOverride(self)
+        self._listeners: list[Callable[[], None]] = []
 
         # The keep-open valve: passed in, or (config version 1) stored on the first entry.
         legacy_id, legacy_name = legacy_keep_open(zone_configs)
@@ -594,6 +598,8 @@ class MasterController:
                 flow_temp = preheating_flow
                 reason = "pre-heating"
 
+        flow_temp, reason = self.flow_override.apply(flow_temp, reason, now)
+
         if flow_temp > 0 and not self.has_open_valve():
             # Logged once per episode: it can persist for hours (e.g. waiting for a valve to open)
             (_LOGGER.debug if self._interlock_active else _LOGGER.warning)(
@@ -642,6 +648,13 @@ class MasterController:
             await self._sync_offsets(now)
 
         await self.set_opentherm_flow_temp(flow_temp, reason)
+        for listener in self._listeners:
+            listener()
+
+    def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """Call `listener` after every control cycle (entities refresh their state); returns the remover."""
+        self._listeners.append(listener)
+        return lambda: self._listeners.remove(listener) if listener in self._listeners else None
 
     async def set_opentherm_flow_temp(self, flow_temp: float, reason: str = "") -> None:
         """Record the boiler flow temperature request (clamped to MIN..MAX, 0 = OFF)."""

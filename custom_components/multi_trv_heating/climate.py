@@ -147,7 +147,8 @@ async def async_setup_entry(
     controller = get_controller(hass, entry)
     if controller is None:
         return
-    async_add_entities(
+    entities = [
         ZoneClimate(zone, controller, entry.entry_id, zone_device_info(entry.entry_id, zone_id, zone.name))
         for zone_id, zone in controller.rooms.items()
-    )
+    ]
+    async_add_entities(entities)

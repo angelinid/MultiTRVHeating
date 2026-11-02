@@ -5,7 +5,7 @@ DOMAIN = "multi_trv_heating"
 # All modules log to this logger so it can be tuned with a single HA `logger:` entry.
 LOGGER_NAME = "don_controller"
 
-PLATFORMS = ["sensor", "switch", "number", "select", "climate"]
+PLATFORMS = ["sensor", "switch", "number", "select", "climate", "button", "binary_sensor"]
 
 # OpenTherm flow temperature limits while the boiler is ON (°C).
 MIN_FLOW_TEMP = 25.0

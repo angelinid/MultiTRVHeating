@@ -120,6 +120,7 @@ class UnifiedTestRunner:
         await self._run_keep_open_safety_tests()
         await self._run_boost_demand_tests()
         await self._run_zone_tests()
+        await self._run_override_tests()
     
     async def _run_preheating_tests(self) -> None:
         """Run pre-heating tests."""
@@ -232,6 +233,25 @@ class UnifiedTestRunner:
 
         except Exception as e:
             self.log.warning(f"Multi-valve zone tests failed to run: {e}")
+            self.results['features']['failed'] += 1
+            self.results['features']['total'] += 1
+
+    async def _run_override_tests(self) -> None:
+        """Run the flow override scenarios on the physical simulation."""
+        print("\n  Flow Override Tests (simulation):")
+        print("  " + "-"*76)
+
+        try:
+            from test_flow_override import OverrideTests
+            suite = OverrideTests()
+            await suite.run_all_tests()
+
+            self.results['features']['passed'] += suite.passed
+            self.results['features']['failed'] += suite.failed
+            self.results['features']['total'] += suite.passed + suite.failed
+
+        except Exception as e:
+            self.log.warning(f"Flow override tests failed to run: {e}")
             self.results['features']['failed'] += 1
             self.results['features']['total'] += 1
 
