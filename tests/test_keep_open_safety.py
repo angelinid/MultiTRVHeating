@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from sim_house import SimHouse
 from zone_wrapper import HOLD_AUTO, HOLD_SWITCH, HOLD_TEMP_OFFSET
 from keep_open import BOILER_PUMP_OVERRUN, CONFIRM_TIMEOUT
+from master_controller import STARTUP_GRACE
 
 HOUR = 3600
 MINUTE = 60
@@ -709,7 +710,7 @@ class KeepOpenSafetyTests:
             c = await s.start(prep=lambda: [s.hass.states.pop(v.calib_id) for v in s.valves.values()])
             for _ in range(30):                      # a burst of events while HA boots
                 await c._calculate_and_command()
-            await s.run(30)
+            await s.run(int(STARTUP_GRACE) + 30)     # the decision waits for the start-up grace time
             n = sum('no valve can be held' in r for r in records)
             self.verify(n == 1, f"one warning for the whole episode (got {n})")
             for v in s.valves.values():              # entities appear: hold works, episode over
@@ -759,6 +760,43 @@ class KeepOpenSafetyTests:
         await s.run(10 * MINUTE)
         self.verify(s.valves['leo'].calibration == HOLD_TEMP_OFFSET, "once they report, the keep-open valve is held")
         self.no_violations(s)
+        s.close()
+
+    async def test_27g_restart_keeps_the_selected_valve_held(self):
+        print("\nTest 27g: After an HA restart the valves report one by one - the held valve keeps its -9 (the selected valve reports late)")
+        for order in (['leo', 'living', 'kitchen', 'bath'], ['leo', 'kitchen', 'bath', 'living']):
+            s = standard_house(discharge='living')
+            await s.start()
+            await s.run(10 * MINUTE)
+            self.verify(s.valves['living'].calibration == HOLD_TEMP_OFFSET and s.valves['living'].position == 100,
+                        "before the restart the selected valve is held open")
+            c = s.restart_controller()
+            for v in s.valves.values():
+                for entity in (v.climate_id, v.pos_id, v.calib_id):
+                    s._set(entity, 'unknown')
+            c._seed_from_states()
+            s.calibration_writes.clear()
+            for key in order:
+                v = s.valves[key]
+                await s._emit(c._async_calibration_change, v.calib_id, str(float(v.calibration)))
+                await s._emit(c._async_position_change, v.pos_id, str(int(v.position)))
+                await s._emit(c._async_climate_state_change, v.climate_id, 'heat', s._climate_attrs(v))
+            await s.run(15 * MINUTE)
+            self.verify(not s.calibration_writes, f"order {order[:2]}...: nothing is written over the held valve ({s.calibration_writes})")
+            self.verify(s.valves['living'].calibration == HOLD_TEMP_OFFSET and s.valves['living'].position == 100,
+                        "the selected valve is still held and open")
+            self.verify([z.name for z in c.zones.values() if z.has_hold(HOLD_AUTO)] == ['Living'], "only the selected valve is held")
+            s.close()
+
+    async def test_27h_valve_that_never_reports_does_not_block_start(self):
+        print("\nTest 27h: A valve that stays offline after a restart delays start-up by the grace time only")
+        s = standard_house(discharge='leo')
+        c = await s.start(prep=lambda: s._set(s.valves['bath'].calib_id, 'unavailable'))
+        await s.run(60)
+        self.verify(c.startup_settling(c.now()), "still waiting for the offline valve after 60 s")
+        await s.run(90)
+        self.verify(not c.startup_settling(c.now()), "settled after the grace time")
+        self.verify(s.valves['leo'].calibration == HOLD_TEMP_OFFSET, "the keep-open valve is held once settled")
         s.close()
 
     async def test_28_fuzz(self):

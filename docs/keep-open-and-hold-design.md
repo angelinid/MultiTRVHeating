@@ -94,3 +94,15 @@ before `ECHO_GRACE` (300 s) has passed; a write the device never reports is rewr
 Calibration entities that are `unknown`/`unavailable` (just after an HA restart) are not written to.
 Every change of the flow request logs an INFO line with the figures behind it (room, TRV reading,
 applied offset, error, opening, demand, hold/boost per active zone).
+
+## Start-up settling (v1.2.9)
+
+The holds are not persisted, so after an HA restart the valves still carry the calibration written
+before it (the held valve is at -9). The entities come back one by one, and a valve's position sensor
+can report after its calibration. Without a guard the first pass found the selected valve "not
+ready", wrote its normal offset over the -9 (it closed) and held another valve instead.
+
+`startup_settling()` is true until every valve has reported position and calibration, or for at most
+`STARTUP_GRACE` (120 s). While it is true no calibration is written and keep-open does not decide
+(reason "starting up"). Valves keep what they have, so the previous hold simply carries on and is
+then confirmed by the normal rules.

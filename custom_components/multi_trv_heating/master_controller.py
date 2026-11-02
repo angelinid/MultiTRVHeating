@@ -64,6 +64,7 @@ TICK_SECONDS = 30
 # Calibration writes: the actuators are slow and battery powered.
 MIN_OFFSET_WRITE_INTERVAL = 120.0   # between non-urgent writes to one TRV
 ECHO_GRACE = 300.0                  # wait this long for the device to report a new calibration (it takes 2-3 min)
+STARTUP_GRACE = 120.0               # after a restart, wait this long at most for every valve to report
 MAX_DRIFT_RETRIES = 3               # rewrite a calibration that does not stick this many times
 
 
@@ -118,6 +119,8 @@ class MasterController:
 
         self._interlock_active = False
         self._last_decision: Optional[tuple] = None
+        self._settle_started: Optional[float] = None
+        self._settled = False
         self._calc_lock = asyncio.Lock()
         self._calc_waiting = False
         self._unsubscribers: list[Callable[[], None]] = []
@@ -391,6 +394,28 @@ class MasterController:
         self.keep_open.update_config(entity_id, name)
         await self._calculate_and_command()
 
+    def startup_settling(self, now: float) -> bool:
+        """
+        True after a restart until every valve has reported (position and calibration), or for at
+        most STARTUP_GRACE. The holds are not persisted: the valves still carry the calibration we
+        wrote before the restart, so until we know them all we neither write calibrations nor move
+        the keep-open hold. Otherwise the first valve to report gets its hold overwritten and a
+        different valve is held instead.
+        """
+        if self._settled:
+            return False
+        if self._settle_started is None:
+            self._settle_started = now
+        known = all(
+            z.position_available and not self.calibration_unavailable(z)
+            for z in self.zones.values() if z.temp_calib_entity_id
+        )
+        if known or now - self._settle_started >= STARTUP_GRACE:
+            self._settled = True
+            _LOGGER.info("Start-up settled after %.0f s (%s)", now - self._settle_started,
+                         "all valves reported" if known else "grace time over")
+        return not self._settled
+
     def calibration_unavailable(self, zone: ZoneWrapper) -> bool:
         """True if the zone's calibration entity is missing or offline, so it cannot be written."""
         states = getattr(self.hass, "states", None)
@@ -450,7 +475,10 @@ class MasterController:
 
     def _decide(self, now: float) -> tuple[float, str]:
         """Keep-open update, boiler decision and interlock. Returns (flow temperature, reason)."""
-        self.keep_open.update(now)
+        if self.startup_settling(now):
+            self.keep_open.last_reason = "starting up"
+        else:
+            self.keep_open.update(now)
 
         boiler_should_be_on, boiler_demand, reason = self._evaluate_boiler_demand()
         _LOGGER.debug(
@@ -551,6 +579,8 @@ class MasterController:
         except for starting a hold (a valve must open now). A calibration the device does not
         keep is rewritten up to MAX_DRIFT_RETRIES times.
         """
+        if self.startup_settling(now):
+            return
         for zone in self.zones.values():
             if not zone.temp_calib_entity_id or self.calibration_unavailable(zone):
                 continue
