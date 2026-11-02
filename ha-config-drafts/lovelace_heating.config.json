@@ -68,22 +68,26 @@
           ]
         },
         {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
+          "type": "vertical-stack",
           "cards": [
             {
-              "type": "thermostat",
+              "type": "tile",
               "entity": "climate.living_room_heating_thermostat",
-              "name": "Living Room Heating"
+              "name": "Living Room Heating",
+              "features": [
+                {
+                  "type": "target-temperature"
+                }
+              ],
+              "vertical": false
             },
             {
-              "type": "entities",
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
               "entities": [
-                {
-                  "type": "section",
-                  "label": "Living Room Heating"
-                },
                 {
                   "entity": "sensor.radiator_1_living_room_battery",
                   "name": "Battery"
@@ -94,12 +98,21 @@
                 },
                 {
                   "entity": "switch.radiator_1_living_room_boost_heating",
-                  "name": "Boost"
-                },
-                {
-                  "type": "section",
-                  "label": "TV Room Heat"
-                },
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
+                }
+              ],
+              "title": "Living Room Heating"
+            },
+            {
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
+              "entities": [
                 {
                   "entity": "sensor.radiator_tv_room_battery",
                   "name": "Battery"
@@ -110,29 +123,37 @@
                 },
                 {
                   "entity": "switch.radiator_tv_room_boost_heating",
-                  "name": "Boost"
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
                 }
-              ]
+              ],
+              "title": "TV Room Heat"
             }
           ]
         },
         {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
+          "type": "vertical-stack",
           "cards": [
             {
-              "type": "thermostat",
+              "type": "tile",
               "entity": "climate.hall_heating_thermostat",
-              "name": "Hall Heating"
+              "name": "Hall Heating",
+              "features": [
+                {
+                  "type": "target-temperature"
+                }
+              ],
+              "vertical": false
             },
             {
-              "type": "entities",
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
               "entities": [
-                {
-                  "type": "section",
-                  "label": "Hall Heating"
-                },
                 {
                   "entity": "sensor.radiator_hall_battery",
                   "name": "Battery"
@@ -143,12 +164,21 @@
                 },
                 {
                   "entity": "switch.radiator_hall_boost_heating",
-                  "name": "Boost"
-                },
-                {
-                  "type": "section",
-                  "label": "Kitchen Heat"
-                },
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
+                }
+              ],
+              "title": "Hall Heating"
+            },
+            {
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
+              "entities": [
                 {
                   "entity": "sensor.radiator_kitchen_battery",
                   "name": "Battery"
@@ -159,24 +189,36 @@
                 },
                 {
                   "entity": "switch.radiator_kitchen_boost_heating",
-                  "name": "Boost"
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
                 }
-              ]
+              ],
+              "title": "Kitchen Heat"
             }
           ]
         },
         {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
+          "type": "vertical-stack",
           "cards": [
             {
-              "type": "thermostat",
+              "type": "tile",
               "entity": "climate.leos_heat_thermostat",
-              "name": "Leos Heat"
+              "name": "Leos Heat",
+              "features": [
+                {
+                  "type": "target-temperature"
+                }
+              ],
+              "vertical": false
             },
             {
-              "type": "entities",
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
               "entities": [
                 {
                   "entity": "sensor.radiator_leo_battery",
@@ -188,24 +230,35 @@
                 },
                 {
                   "entity": "switch.radiator_leo_boost_heating",
-                  "name": "Boost"
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
                 }
               ]
             }
           ]
         },
         {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
+          "type": "vertical-stack",
           "cards": [
             {
-              "type": "thermostat",
+              "type": "tile",
               "entity": "climate.bathroom_heating_thermostat",
-              "name": "Bathroom Heating"
+              "name": "Bathroom Heating",
+              "features": [
+                {
+                  "type": "target-temperature"
+                }
+              ],
+              "vertical": false
             },
             {
-              "type": "entities",
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
               "entities": [
                 {
                   "entity": "sensor.radiator_bathroom_battery",
@@ -217,29 +270,36 @@
                 },
                 {
                   "entity": "switch.radiator_bathroom_boost_heating",
-                  "name": "Boost"
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
                 }
               ]
             }
           ]
         },
         {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
+          "type": "vertical-stack",
           "cards": [
             {
-              "type": "thermostat",
+              "type": "tile",
               "entity": "climate.bedroom_1_heating_thermostat",
-              "name": "Bedroom 1"
+              "name": "Bedroom Heating",
+              "features": [
+                {
+                  "type": "target-temperature"
+                }
+              ],
+              "vertical": false
             },
             {
-              "type": "entities",
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
               "entities": [
-                {
-                  "type": "section",
-                  "label": "Bedroom 1"
-                },
                 {
                   "entity": "sensor.radiator_1_bedroom_battery",
                   "name": "Battery"
@@ -250,12 +310,21 @@
                 },
                 {
                   "entity": "switch.radiator_1_bedroom_boost_heating",
-                  "name": "Boost"
-                },
-                {
-                  "type": "section",
-                  "label": "Bedroom 2 Heating"
-                },
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
+                }
+              ],
+              "title": "Bedroom 1"
+            },
+            {
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
+              "entities": [
                 {
                   "entity": "sensor.radiator_2_bedroom_battery",
                   "name": "Battery"
@@ -266,24 +335,36 @@
                 },
                 {
                   "entity": "switch.radiator_2_bedroom_boost_heating",
-                  "name": "Boost"
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
                 }
-              ]
+              ],
+              "title": "Bedroom 2 Heating"
             }
           ]
         },
         {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
+          "type": "vertical-stack",
           "cards": [
             {
-              "type": "thermostat",
+              "type": "tile",
               "entity": "climate.ensuite_heating_thermostat",
-              "name": "Ensuite Heating"
+              "name": "Ensuite Heating",
+              "features": [
+                {
+                  "type": "target-temperature"
+                }
+              ],
+              "vertical": false
             },
             {
-              "type": "entities",
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
               "entities": [
                 {
                   "entity": "sensor.radiator_ensuite_battery",
@@ -295,24 +376,35 @@
                 },
                 {
                   "entity": "switch.radiator_ensuite_boost_heating",
-                  "name": "Boost"
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
                 }
               ]
             }
           ]
         },
         {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
+          "type": "vertical-stack",
           "cards": [
             {
-              "type": "thermostat",
+              "type": "tile",
               "entity": "climate.study_heat_thermostat",
-              "name": "Study Heat"
+              "name": "Study Heat",
+              "features": [
+                {
+                  "type": "target-temperature"
+                }
+              ],
+              "vertical": false
             },
             {
-              "type": "entities",
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
               "entities": [
                 {
                   "entity": "sensor.radiator_study_battery",
@@ -324,24 +416,35 @@
                 },
                 {
                   "entity": "switch.radiator_study_boost_heating",
-                  "name": "Boost"
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
                 }
               ]
             }
           ]
         },
         {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
+          "type": "vertical-stack",
           "cards": [
             {
-              "type": "thermostat",
+              "type": "tile",
               "entity": "climate.toilet_heat_thermostat",
-              "name": "Toilet Heat"
+              "name": "Toilet Heat",
+              "features": [
+                {
+                  "type": "target-temperature"
+                }
+              ],
+              "vertical": false
             },
             {
-              "type": "entities",
+              "type": "glance",
+              "columns": 3,
+              "show_name": true,
+              "show_state": true,
+              "state_color": true,
               "entities": [
                 {
                   "entity": "sensor.radiator_toilet_battery",
@@ -353,7 +456,10 @@
                 },
                 {
                   "entity": "switch.radiator_toilet_boost_heating",
-                  "name": "Boost"
+                  "name": "Boost",
+                  "tap_action": {
+                    "action": "more-info"
+                  }
                 }
               ]
             }
