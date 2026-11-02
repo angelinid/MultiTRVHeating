@@ -119,6 +119,7 @@ class UnifiedTestRunner:
         await self._run_hold_mode_tests()
         await self._run_keep_open_safety_tests()
         await self._run_boost_demand_tests()
+        await self._run_zone_tests()
     
     async def _run_preheating_tests(self) -> None:
         """Run pre-heating tests."""
@@ -212,6 +213,25 @@ class UnifiedTestRunner:
 
         except Exception as e:
             self.log.warning(f"Boost demand tests failed to run: {e}")
+            self.results['features']['failed'] += 1
+            self.results['features']['total'] += 1
+
+    async def _run_zone_tests(self) -> None:
+        """Run the multi-valve zone scenarios."""
+        print("\n  Multi-valve Zone Tests:")
+        print("  " + "-"*76)
+
+        try:
+            from test_zones import ZoneTests
+            suite = ZoneTests()
+            await suite.run_all_tests()
+
+            self.results['features']['passed'] += suite.passed
+            self.results['features']['failed'] += suite.failed
+            self.results['features']['total'] += suite.passed + suite.failed
+
+        except Exception as e:
+            self.log.warning(f"Multi-valve zone tests failed to run: {e}")
             self.results['features']['failed'] += 1
             self.results['features']['total'] += 1
 

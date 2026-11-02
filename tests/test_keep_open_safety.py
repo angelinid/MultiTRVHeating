@@ -21,9 +21,9 @@ HOUR = 3600
 MINUTE = 60
 
 
-def standard_house(discharge='leo', hold_writes=True, leo=(20.0, 18.0), others=(20.5, 19.0)) -> SimHouse:
+def standard_house(keep_open='leo', hold_writes=True, leo=(20.0, 18.0), others=(20.5, 19.0)) -> SimHouse:
     """Leo (low priority, external sensor, the selected keep-open valve) and three other rooms."""
-    s = SimHouse(discharge=discharge, hold_writes=hold_writes)
+    s = SimHouse(keep_open=keep_open, hold_writes=hold_writes)
     s.add('leo', temp=leo[0], setpoint=leo[1], high=False, ext=True)
     s.add('living', temp=others[0], setpoint=others[1])
     s.add('kitchen', temp=others[0], setpoint=others[1])
@@ -34,7 +34,7 @@ def standard_house(discharge='leo', hold_writes=True, leo=(20.0, 18.0), others=(
 async def fuzz_house(seed: int, trace: bool = False, speed: tuple = (15, 15), events: int = 12):
     """Random house with random events; returns (house, action log). speed = actuator s/step range."""
     rnd = random.Random(seed)
-    s = SimHouse(discharge=rnd.choice(['leo', 'living', 'kitchen', 'bath']), hold_writes=True)
+    s = SimHouse(keep_open=rnd.choice(['leo', 'living', 'kitchen', 'bath']), hold_writes=True)
     s.zigbee_delay = rnd.randint(1, 8) if speed != (15, 15) else 3
     names = ['leo', 'living', 'kitchen', 'bath']
     actions = []
@@ -225,7 +225,7 @@ class KeepOpenSafetyTests:
 
     async def test_07_room_hold_does_not_change_the_permanent_keep_open_hold(self):
         print("\nTest 7: A room hold (switch) comes and goes - the keep-open valve stays held throughout")
-        s = standard_house(discharge='bath', leo=(20.5, 19.0))
+        s = standard_house(keep_open='bath', leo=(20.5, 19.0))
         c = await s.start()
         await c.async_set_zone_hold(c.zones['climate.leo'], HOLD_SWITCH, True)
         await s.run(2 * HOUR)
@@ -239,7 +239,7 @@ class KeepOpenSafetyTests:
 
     async def test_08_selected_valve_is_the_held_room(self):
         print("\nTest 8: Selected valve is the night-held room - release hands over without a write")
-        s = standard_house(discharge='leo', leo=(20.5, 19.0))
+        s = standard_house(keep_open='leo', leo=(20.5, 19.0))
         c = await s.start()
         zone = c.zones['climate.leo']
         await c.async_set_zone_hold(zone, HOLD_SWITCH, True)
@@ -303,7 +303,7 @@ class KeepOpenSafetyTests:
 
     async def test_13_no_flow_without_open_valve_preheating(self):
         print("\nTest 13: Pre-heating wants flow but every valve is shut - interlock holds the boiler")
-        s = standard_house(discharge=None, leo=(15.0, 20.0), others=(15.0, 20.0))
+        s = standard_house(keep_open=None, leo=(15.0, 20.0), others=(15.0, 20.0))
         for v in s.valves.values():
             v.force_target = 0.0
         c = await s.start()
@@ -437,7 +437,7 @@ class KeepOpenSafetyTests:
 
     async def test_20_restart_with_stale_heating_offsets(self):
         print("\nTest 20: Restart finds TRVs stuck at -2 - they are corrected once, not every cycle")
-        s = standard_house(discharge=None)
+        s = standard_house(keep_open=None)
         for v in s.valves.values():
             v.calibration = -2.0
         c = await s.start()
@@ -471,7 +471,7 @@ class KeepOpenSafetyTests:
 
     async def test_23_selection_changed_while_holding(self):
         print("\nTest 23: Keep-open valve re-selected while a hold is active")
-        s = standard_house(discharge='leo')
+        s = standard_house(keep_open='leo')
         c = await s.start()
         await s.run(10 * MINUTE)
         c.keep_open.update_config('climate.bath', 'Bath')
@@ -483,7 +483,7 @@ class KeepOpenSafetyTests:
 
     async def test_23b_selection_moves_the_hold_without_a_closing_trigger(self):
         print("\nTest 23b: Selection changed with a neighbour valve open at 25 % - hold moves in the same cycle")
-        s = standard_house(discharge='leo', others=(20.5, 19.0))
+        s = standard_house(keep_open='leo', others=(20.5, 19.0))
         c = await s.start()
         await s.run(10 * MINUTE)
         s.valves['living'].setpoint = 22.0
@@ -500,7 +500,7 @@ class KeepOpenSafetyTests:
 
     async def test_23c_selection_cleared_and_reselected(self):
         print("\nTest 23c: Selection cleared, then set again")
-        s = standard_house(discharge='leo')
+        s = standard_house(keep_open='leo')
         c = await s.start()
         await s.run(10 * MINUTE)
         await c.async_set_keep_open_valve(None, None)
@@ -513,7 +513,7 @@ class KeepOpenSafetyTests:
 
     async def test_23d_selection_changed_inside_pump_overrun(self):
         print("\nTest 23d: Selection changed during the pump overrun - never without an open valve")
-        s = standard_house(discharge='leo', others=(14.0, 19.0))
+        s = standard_house(keep_open='leo', others=(14.0, 19.0))
         c = await s.start()
         await s.run(12 * MINUTE)
         for k in ('living', 'kitchen', 'bath'):
@@ -528,7 +528,7 @@ class KeepOpenSafetyTests:
 
     async def test_23e_handover_keeps_old_hold_until_new_valve_is_confirmed(self):
         print("\nTest 23e: Handover - the old valve is released only after the new one has the offset and is open")
-        s = standard_house(discharge='leo', others=(20.5, 19.0))
+        s = standard_house(keep_open='leo', others=(20.5, 19.0))
         for v in s.valves.values():
             v.step_seconds = 40                      # slow actuators
         s.zigbee_delay = 20
@@ -566,7 +566,7 @@ class KeepOpenSafetyTests:
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
-            s = standard_house(discharge='leo', others=(20.5, 19.0))
+            s = standard_house(keep_open='leo', others=(20.5, 19.0))
             c = await s.start()
             await s.run(10 * MINUTE)
             s.valves['bath'].stuck = True
@@ -593,7 +593,7 @@ class KeepOpenSafetyTests:
         logger.addHandler(handler)
         logger.setLevel(logging.WARNING)
         try:
-            s = standard_house(discharge='leo', others=(20.5, 19.0))
+            s = standard_house(keep_open='leo', others=(20.5, 19.0))
             s.valves['bath'].setpoint = 5.0           # frost setpoint: -9 does not make the reading drop below it
             c = await s.start()
             await s.run(10 * MINUTE)
@@ -609,7 +609,7 @@ class KeepOpenSafetyTests:
 
     async def test_24_feature_disabled(self):
         print("\nTest 24: No keep-open valve selected - nothing is held, interlock still applies")
-        s = standard_house(discharge=None, others=(16.5, 19.0))
+        s = standard_house(keep_open=None, others=(16.5, 19.0))
         c = await s.start()
         await s.run(2 * HOUR)
         self.verify(not any(z.has_hold(HOLD_AUTO) for z in c.zones.values()), "no automatic hold")
@@ -657,7 +657,7 @@ class KeepOpenSafetyTests:
 
     async def test_27b_no_writes_before_entities_exist(self):
         print("\nTest 27b: Calibration entities not there yet at startup - nothing is written into the void")
-        s = standard_house(discharge=None)
+        s = standard_house(keep_open=None)
         for v in s.valves.values():
             v.calibration = -2.0
         c = await s.start(prep=lambda: [s.hass.states.pop(v.calib_id) for v in s.valves.values()])
@@ -673,7 +673,7 @@ class KeepOpenSafetyTests:
 
     async def test_27c_decision_rechecked_after_valve_open_wait(self):
         print("\nTest 27c: Boiler start waits for the valves, then decides again instead of committing a stale ON")
-        s = standard_house(others=(14.0, 19.0), discharge=None)
+        s = standard_house(others=(14.0, 19.0), keep_open=None)
         c = await s.start()
         await s.run(2 * MINUTE)
         self.verify(c.current_flow_temp > 0, "boiler running (setup)")
@@ -751,7 +751,7 @@ class KeepOpenSafetyTests:
 
     async def test_27f_no_blind_writes_while_calibration_entities_are_unknown(self):
         print("\nTest 27f: Right after an HA restart the calibration entities are 'unknown' - nothing is written until they report")
-        s = standard_house(discharge='leo', others=(20.5, 19.0))
+        s = standard_house(keep_open='leo', others=(20.5, 19.0))
         c = await s.start(prep=lambda: [s._set(v.calib_id, 'unknown') for v in s.valves.values()])
         await s.run(5 * MINUTE)
         self.verify(all(not s.writes_for(k) for k in s.valves), f"no calibration written blind ({[(k, s.writes_for(k)) for k in s.valves if s.writes_for(k)]})")
@@ -765,7 +765,7 @@ class KeepOpenSafetyTests:
     async def test_27g_restart_keeps_the_selected_valve_held(self):
         print("\nTest 27g: After an HA restart the valves report one by one - the held valve keeps its -9 (the selected valve reports late)")
         for order in (['leo', 'living', 'kitchen', 'bath'], ['leo', 'kitchen', 'bath', 'living']):
-            s = standard_house(discharge='living')
+            s = standard_house(keep_open='living')
             await s.start()
             await s.run(10 * MINUTE)
             self.verify(s.valves['living'].calibration == HOLD_TEMP_OFFSET and s.valves['living'].position == 100,
@@ -790,7 +790,7 @@ class KeepOpenSafetyTests:
 
     async def test_27h_valve_that_never_reports_does_not_block_start(self):
         print("\nTest 27h: A valve that stays offline after a restart delays start-up by the grace time only")
-        s = standard_house(discharge='leo')
+        s = standard_house(keep_open='leo')
         c = await s.start(prep=lambda: s._set(s.valves['bath'].calib_id, 'unavailable'))
         await s.run(60)
         self.verify(c.startup_settling(c.now()), "still waiting for the offline valve after 60 s")

@@ -126,12 +126,12 @@ class SimValve:
 
 
 class SimHouse:
-    def __init__(self, discharge: Optional[str] = None, hold_writes: bool = True) -> None:
+    def __init__(self, keep_open: Optional[str] = None, hold_writes: bool = True) -> None:
         self.t = 0
         self.hass = MockHass()
         self.rooms: list[SimRoom] = []
         self.valves: dict[str, SimValve] = {}
-        self.discharge = discharge
+        self.keep_open = keep_open
         self.zigbee_delay = ZIGBEE_DELAY
         self.hold_writes = hold_writes
         self.controller: Optional[MasterController] = None
@@ -177,9 +177,9 @@ class SimHouse:
             }
             if v.ext_id:
                 cfg['ext_temp_entity_id'] = v.ext_id
-            if i == 0 and self.discharge:
-                cfg['discharge_trv_entity_id'] = self.valves[self.discharge].climate_id
-                cfg['discharge_trv_name'] = self.valves[self.discharge].key.title()
+            if i == 0 and self.keep_open:
+                cfg['discharge_trv_entity_id'] = self.valves[self.keep_open].climate_id
+                cfg['discharge_trv_name'] = self.valves[self.keep_open].key.title()
             configs.append(cfg)
         return configs
 

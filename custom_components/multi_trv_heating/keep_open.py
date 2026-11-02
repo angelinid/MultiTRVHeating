@@ -48,7 +48,7 @@ CONFIRM_TIMEOUT = 180.0
 
 class KeepOpenController:
     """
-    Never leave every valve closed: the selected "discharge" valve is held open permanently
+    Never leave every valve closed: the selected valve is held open permanently
     (via the TRV calibration offset), whatever the other valves or the boiler are doing. A heat
     request elsewhere never releases it, so a valve is always open for the pump, including the
     BOILER_PUMP_OVERRUN after the boiler stops. The room of the held valve is allowed to get warmer
@@ -65,11 +65,11 @@ class KeepOpenController:
     """
 
     def __init__(self, controller: "MasterController",
-                 discharge_trv_entity_id: Optional[str] = None,
-                 discharge_trv_name: Optional[str] = None) -> None:
+                 keep_valve_id: Optional[str] = None,
+                 keep_valve_name: Optional[str] = None) -> None:
         self.controller = controller
-        self.discharge_trv_entity_id = discharge_trv_entity_id
-        self.discharge_trv_name = discharge_trv_name or "Unknown"
+        self.keep_valve_id = keep_valve_id
+        self.keep_valve_name = keep_valve_name or "Unknown"
 
         self.engaged_at: Optional[float] = None       # controller clock, first auto hold of this episode
         self.last_escalation_at: Optional[float] = None
@@ -78,16 +78,16 @@ class KeepOpenController:
         self._warned_unholdable = False                 # "no valve can be held" already logged this episode
         self.last_reason = "idle"
         _LOGGER.debug(
-            "Keep-open valve: %s (%s)", discharge_trv_entity_id or "not set", self.discharge_trv_name
+            "Keep-open valve: %s (%s)", keep_valve_id or "not set", self.keep_valve_name
         )
 
-    def update_config(self, discharge_trv_entity_id: Optional[str],
-                      discharge_trv_name: Optional[str]) -> None:
+    def update_config(self, keep_valve_id: Optional[str],
+                      keep_valve_name: Optional[str]) -> None:
         """Change which TRV is held open (None disables the feature)."""
-        self.discharge_trv_entity_id = discharge_trv_entity_id
-        self.discharge_trv_name = discharge_trv_name or "Unknown"
+        self.keep_valve_id = keep_valve_id
+        self.keep_valve_name = keep_valve_name or "Unknown"
         _LOGGER.debug(
-            "Keep-open valve: %s (%s)", discharge_trv_entity_id or "not set", self.discharge_trv_name
+            "Keep-open valve: %s (%s)", keep_valve_id or "not set", self.keep_valve_name
         )
 
     @property
@@ -99,9 +99,9 @@ class KeepOpenController:
     # ------------------------------------------------------------------
 
     def _primary(self) -> Optional[ZoneWrapper]:
-        if self.discharge_trv_entity_id is None:
+        if self.keep_valve_id is None:
             return None
-        return self.controller.zones.get(self.discharge_trv_entity_id)
+        return self.controller.zones.get(self.keep_valve_id)
 
     def _usable(self, zone: ZoneWrapper) -> bool:
         """A zone can be held if we can write its calibration and the entity is not offline."""
@@ -244,8 +244,8 @@ class KeepOpenController:
         now = self.controller.now()
         held = [z.name for z in self.controller.zones.values() if z.has_hold(HOLD_AUTO)]
         return {
-            "discharge_trv_entity_id": self.discharge_trv_entity_id,
-            "discharge_trv_name": self.discharge_trv_name,
+            "keep_valve_id": self.keep_valve_id,
+            "keep_valve_name": self.keep_valve_name,
             "is_holding": bool(held),
             "held_zones": held,
             "held_seconds": round(now - self.engaged_at, 1) if self.engaged_at is not None else 0.0,

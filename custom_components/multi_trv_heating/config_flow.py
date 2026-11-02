@@ -29,181 +29,130 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_AREA,
-    CONF_DISCHARGE_TRV_ENTITY_ID,
-    CONF_DISCHARGE_TRV_NAME,
     CONF_ENTITY_ID,
     CONF_EXT_TEMP_ENTITY_ID,
+    CONF_KEEP_OPEN_VALVE,
     CONF_NAME,
     CONF_PRIORITY,
     CONF_TEMP_CALIBRATION_ENTITY_ID,
     CONF_TRV_POSITION_ENTITY_ID,
+    CONF_VALVES,
+    CONF_ZONES,
     DOMAIN,
 )
 
-# Define the data schema for the zone configuration
-# This defines the structure of data for each zone
-DATA_SCHEMA = vol.Schema({
-    # Use EntitySelector for searchable dropdown (filter to climate entities)
+# A zone (room): what its valves share
+ZONE_SCHEMA = vol.Schema({
+    vol.Required(CONF_NAME): str,
+    vol.Optional(CONF_AREA, default=0.0): vol.Coerce(float),
+    # Priority: True=high priority (triggers at any opening), False=low priority (needs 100%)
+    vol.Optional(CONF_PRIORITY, default=True): bool,
+    # Optional room temperature sensor; without it the zone uses the average of its valves' readings
+    vol.Optional(CONF_EXT_TEMP_ENTITY_ID): selector.EntitySelector(
+        selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
+    ),
+})
+
+# One valve (TRV) of the zone
+VALVE_SCHEMA = vol.Schema({
     vol.Required(CONF_ENTITY_ID): selector.EntitySelector(
         selector.EntitySelectorConfig(domain="climate")
     ),
-    
     vol.Optional(CONF_NAME): str,
-    vol.Optional(CONF_AREA, default=0.0): vol.Coerce(float),
-    
-    # Priority: boolean True=high priority (triggers at any opening), False=low priority (needs 100%)
-    vol.Optional(CONF_PRIORITY, default=True): bool,
-    
-    # TRV valve position sensor (e.g., sensor.radiator_1_bedroom_position)
-    # Reports 0-100% valve opening
+    # Valve position sensor (0-100 % opening)
     vol.Required(CONF_TRV_POSITION_ENTITY_ID): selector.EntitySelector(
         selector.EntitySelectorConfig(domain="sensor")
     ),
-    
-    # Temperature calibration (offset) number entity (e.g., number.radiator_1_bedroom_local_temperature_calibration)
-    # Allows adjusting TRV's temperature reading to make it open/close more
+    # Temperature calibration (offset) number entity of the TRV
     vol.Required(CONF_TEMP_CALIBRATION_ENTITY_ID): selector.EntitySelector(
         selector.EntitySelectorConfig(domain="number")
-    ),
-    
-    # Optional external temperature entity for better temperature readings
-    # Useful when TRV is mounted near radiator and gives inaccurate readings
-    vol.Optional(CONF_EXT_TEMP_ENTITY_ID): selector.EntitySelector(
-        selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
     ),
 })
 
 
 class OpenThermConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """
-    Handle config flow for the Multi-TRV Heating MasterController.
-    
-    This configuration flow guides users through:
-    1. Adding zones (climate entities with TRV valves)
-    2. Setting zone properties:
-       - Zone name (optional, defaults to entity name)
-       - Floor area in m² (optional, for demand calculation)
-       - Priority: high (default) or low (needs 100% opening or aggregates)
-       - External temperature sensor (optional, for better readings)
-    3. Adding multiple zones iteratively
-    4. Finalizing configuration
+    Config flow for the Multi-TRV Heating controller.
+
+    1. zone: name, area, priority, optional room temperature sensor
+    2. valve: climate entity, position sensor and calibration number of one TRV
+    3. another valve in the same zone? (back to 2)
+    4. another zone? (back to 1)
+    5. keep-open valve: the valve held open so the pump never runs against closed valves (optional)
     """
 
-    VERSION = 1
+    VERSION = 2
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
 
-    # Internal list to store zone configurations as the user adds them
-    # This is cleared after config entry creation
-    _zones_config = [] 
+    def __init__(self) -> None:
+        self._zones: list[dict] = []
+        self._zone: dict = {}
 
     async def async_step_user(self, user_input=None):
-        """
-        Handle the initial step when user adds the component.
-        
-        Presents form to configure a zone:
-        - Select a climate entity (required) - the TRV thermostat
-        - Enter zone name (optional, defaults to entity name)
-        - Enter floor area in m² (optional)
-        - Set priority (required boolean) - True=high priority (any opening), False=low priority (needs 100%)
-        - Select TRV position sensor (required) - e.g., sensor.radiator_1_bedroom_position
-        - Select temperature calibration entity (required) - e.g., number.radiator_1_bedroom_local_temperature_calibration
-        - Select optional external temperature sensor - for more accurate room readings
-        
-        Args:
-            user_input: Dictionary of user input from form
-        """
-        errors = {}
-
+        """Start a zone."""
         if user_input is not None:
-            # Validate and store the zone configuration
-            self._zones_config.append(user_input)
-            
-            # Ask user if they want to add another zone
-            return await self.async_step_add_another()
-            
-        # Initial form shown to the user
+            self._zone = {**user_input, CONF_VALVES: []}
+            return await self.async_step_valve()
         return self.async_show_form(
             step_id="user",
-            data_schema=DATA_SCHEMA,
-            errors=errors,
-            description_placeholders={"count": len(self._zones_config)}
+            data_schema=ZONE_SCHEMA,
+            description_placeholders={"count": len(self._zones)},
         )
 
-    async def async_step_add_another(self, user_input=None):
-        """
-        Ask the user if they want to add another zone.
-        
-        After successful zone configuration, offers the user a choice to:
-        - Add another zone (returns to async_step_user)
-        - Finish configuration (creates config entry with all zones)
-        
-        Args:
-            user_input: Dictionary with 'add_another' boolean
-        """
+    async def async_step_valve(self, user_input=None):
+        """Add a valve (TRV) to the zone."""
+        if user_input is not None:
+            valve = dict(user_input)
+            valve.setdefault(CONF_NAME, valve[CONF_ENTITY_ID])
+            self._zone[CONF_VALVES].append(valve)
+            return await self.async_step_add_valve()
+        return self.async_show_form(
+            step_id="valve",
+            data_schema=VALVE_SCHEMA,
+            description_placeholders={"zone": self._zone.get(CONF_NAME, ""), "count": len(self._zone[CONF_VALVES])},
+        )
+
+    async def async_step_add_valve(self, user_input=None):
+        """Ask whether the zone has another valve."""
         if user_input is not None:
             if user_input.get("add_another"):
-                # If yes, go back to the user step to collect data for the next zone
-                return await self.async_step_user()
-            
-            # If no, proceed to discharge TRV selection
-            return await self.async_step_discharge_trv()
-
-        # Form to ask if more zones are needed
+                return await self.async_step_valve()
+            zone = self._zone
+            zone["zone_id"] = zone[CONF_VALVES][0][CONF_ENTITY_ID]
+            self._zones.append(zone)
+            self._zone = {}
+            return await self.async_step_add_zone()
         return self.async_show_form(
-            step_id="add_another",
-            data_schema=vol.Schema({
-                vol.Required("add_another", default=True): bool
-            }),
-            description_placeholders={"current_count": len(self._zones_config)}
+            step_id="add_valve",
+            data_schema=vol.Schema({vol.Required("add_another", default=False): bool}),
         )
 
-    async def async_step_discharge_trv(self, user_input=None):
-        """
-        Ask user to select which TRV should be used for pump discharge.
-        
-        The pump discharge valve keeps the boiler pump running for ~5 minutes
-        after all zones shut off, preventing water stagnation in the pipes.
-        
-        Args:
-            user_input: Dictionary with optional discharge TRV selection
-        """
+    async def async_step_add_zone(self, user_input=None):
+        """Ask whether to add another zone."""
         if user_input is not None:
-            # Store discharge TRV in the first zone config (shared controller setting)
-            discharge_entity_id = user_input.get(CONF_DISCHARGE_TRV_ENTITY_ID)
-            discharge_name = user_input.get(CONF_DISCHARGE_TRV_NAME, "Unknown")
-            
-            if discharge_entity_id:
-                # Add to first zone config as a shared setting
-                if self._zones_config:
-                    self._zones_config[0][CONF_DISCHARGE_TRV_ENTITY_ID] = discharge_entity_id
-                    self._zones_config[0][CONF_DISCHARGE_TRV_NAME] = discharge_name
-            
-            # Finalize the configuration with all collected zones
-            zones = self._zones_config
-            self._zones_config = []
-            
-            return self.async_create_entry(
-                title="Multi-TRV Heating Controller",
-                data={"zones": zones},  # Save the final list of zones
-            )
-
-        # Build list of zone entities for discharge TRV selection
-        zone_choices = {}
-        for zone_config in self._zones_config:
-            entity_id = zone_config.get(CONF_ENTITY_ID)
-            name = zone_config.get(CONF_NAME, entity_id)
-            if entity_id:
-                zone_choices[entity_id] = name
-
-        # Form to select discharge TRV (optional)
+            if user_input.get("add_another"):
+                return await self.async_step_user()
+            return await self.async_step_keep_open()
         return self.async_show_form(
-            step_id="discharge_trv",
-            data_schema=vol.Schema({
-                vol.Optional(CONF_DISCHARGE_TRV_ENTITY_ID): vol.In(zone_choices),
-                vol.Optional(CONF_DISCHARGE_TRV_NAME): str,
-            }),
-            description_placeholders={
-                "zone_count": len(self._zones_config),
-                "info": "Select which TRV should be used for pump discharge (optional)"
-            }
+            step_id="add_zone",
+            data_schema=vol.Schema({vol.Required("add_another", default=True): bool}),
+            description_placeholders={"current_count": len(self._zones)},
+        )
+
+    async def async_step_keep_open(self, user_input=None):
+        """Choose the valve that is held open (optional)."""
+        if user_input is not None:
+            data = {CONF_ZONES: self._zones}
+            if user_input.get(CONF_KEEP_OPEN_VALVE):
+                data[CONF_KEEP_OPEN_VALVE] = user_input[CONF_KEEP_OPEN_VALVE]
+            self._zones = []
+            return self.async_create_entry(title="Multi-TRV Heating Controller", data=data)
+
+        valves = {
+            valve[CONF_ENTITY_ID]: valve.get(CONF_NAME, valve[CONF_ENTITY_ID])
+            for zone in self._zones for valve in zone[CONF_VALVES]
+        }
+        return self.async_show_form(
+            step_id="keep_open",
+            data_schema=vol.Schema({vol.Optional(CONF_KEEP_OPEN_VALVE): vol.In(valves)}),
         )

@@ -213,7 +213,7 @@ class MultiTRVHeatingEntityManager:
             self.controller_sensors.append(sensor)
         
         # Create zone sensors
-        for zone_entity_id, zone in self.controller.zones.items():
+        for zone_entity_id, zone in self.controller.rooms.items():
             zone_sensors = []
             # Get device info for this zone if available
             device_info = self.zone_devices.get(zone_entity_id)
@@ -267,7 +267,7 @@ async def async_setup_entry(
 
     zone_device_infos = {
         zone_entity_id: zone_device_info(entry.entry_id, zone_entity_id, zone.name)
-        for zone_entity_id, zone in controller.zones.items()
+        for zone_entity_id, zone in controller.rooms.items()
     }
     manager = MultiTRVHeatingEntityManager(
         controller, entry.entry_id, zone_device_infos, controller_device_info(entry.entry_id)

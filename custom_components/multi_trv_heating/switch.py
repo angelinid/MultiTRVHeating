@@ -109,7 +109,7 @@ class HoldOpenSwitch(MultiTRVHeatingSwitch):
     """
     Hold a zone's valve open (e.g. a bedroom overnight).
 
-    While ON the TRV is forced open through its calibration offset, the zone asks for heat from
+    One per valve (a zone with two valves has two). While ON the TRV is forced open through its calibration offset, the zone asks for heat from
     its room temperature (external sensor when available) and, whatever its priority, is
     treated like a high-priority zone. State survives restarts.
     """
@@ -293,7 +293,7 @@ async def async_setup_entry(
             zone.name, zone_entity_id, zone, entry.entry_id,
             zone_device_info(entry.entry_id, zone_entity_id, zone.name), hass,
         )
-        for zone_entity_id, zone in controller.zones.items()
+        for zone_entity_id, zone in controller.rooms.items()
     ]
 
     # NOTE: differs from the controller device name used by the other platforms; kept as-is.
@@ -305,10 +305,10 @@ async def async_setup_entry(
     )
     switches.extend(
         HoldOpenSwitch(
-            zone.name, zone_entity_id, zone, controller, entry.entry_id,
-            zone_device_info(entry.entry_id, zone_entity_id, zone.name), hass,
+            valve.name, valve_entity_id, valve, controller, entry.entry_id,
+            zone_device_info(entry.entry_id, valve.zone.zone_id, valve.zone.name), hass,
         )
-        for zone_entity_id, zone in controller.zones.items()
+        for valve_entity_id, valve in controller.zones.items()   # one per valve
     )
     switches.append(PreheatingEnableSwitch(controller, entry.entry_id, controller_device, hass))
     switches.append(HoldWritesSwitch(controller, entry.entry_id, controller_device, hass))

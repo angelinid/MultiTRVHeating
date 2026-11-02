@@ -24,6 +24,7 @@ from .entity import (
     PersistentEntityMixin,
     controller_device_info,
     get_controller,
+    get_storage,
     prefixed_unique_id,
     zone_device_info,
     zone_slug,
@@ -56,62 +57,74 @@ class MultiTRVHeatingSelect(PersistentEntityMixin, SelectEntity):
         return self._attr_options
 
 
-class DischargeTRVSelect(MultiTRVHeatingSelect):
-    """Choose the zone whose TRV is held open when the other valves are about to close."""
+class KeepOpenValveSelect(MultiTRVHeatingSelect):
+    """Choose the valve that is held open when the other valves are about to close."""
 
-    STORAGE_PREFIX = "discharge_trv_select"
+    STORAGE_PREFIX = "keep_open_valve_select"
 
     def __init__(self, controller, entry_id: Optional[str] = None,
                  device_info: Optional[Any] = None, hass: Optional[Any] = None) -> None:
         super().__init__(
-            name="Discharge TRV",
-            unique_id=f"{entry_id}_discharge_trv_select" if entry_id else "multi_trv_discharge_trv_select",
-            icon="mdi:water-pump",
+            name="Keep-open valve",
+            unique_id=f"{entry_id}_keep_open_valve_select" if entry_id else "multi_trv_keep_open_valve_select",
+            icon="mdi:valve-open",
             device_info=device_info,
         )
         self.controller = controller
         self.hass = hass
+        self._entry_id = entry_id
         self._attr_has_entity_name = True
-        self._attr_options = [OPTION_OFF] + [z.name for z in controller.zones.values()] if controller else [OPTION_OFF]
+        self._attr_options = [OPTION_OFF] + [v.name for v in controller.zones.values()] if controller else [OPTION_OFF]
 
-        stored_option = self._restore_stored()
+        stored_option = self._restore_stored() or self._legacy_stored()
         if stored_option and stored_option in self._attr_options:
             self._attr_current_option = stored_option
             self._apply_option(stored_option)
-            _LOGGER.info("Restored discharge TRV selection from storage: %s", stored_option)
+            _LOGGER.info("Restored keep-open valve selection from storage: %s", stored_option)
         else:
             self._attr_current_option = self._option_from_controller()
+
+    def _legacy_stored(self) -> Optional[str]:
+        """The choice made with the old Discharge TRV select (a zone name = the valve's name)."""
+        storage = get_storage()
+        if not storage:
+            return None
+        prefix = "discharge_trv_select_"
+        for key in list(storage.data):
+            if key.startswith(prefix) and key.endswith("discharge_trv_select"):
+                return storage.get(key)
+        return None
 
     def _option_from_controller(self) -> str:
         """Current option according to the controller's keep-open config."""
         if not self.controller or not self.controller.keep_open:
             return OPTION_OFF
-        name = self.controller.keep_open.discharge_trv_name
+        name = self.controller.keep_open.keep_valve_name
         if name and name != "Unknown" and name in self._attr_options:
             return name
         return OPTION_OFF
 
     def _apply_option(self, option: str) -> bool:
-        """Point the keep-open valve at the zone named `option` (or disable). False if not found."""
+        """Point the keep-open feature at the valve named `option` (or disable). False if not found."""
         if option == OPTION_OFF:
             self.controller.keep_open.update_config(None, None)
             return True
-        for zone in self.controller.zones.values():
-            if zone.name == option:
-                self.controller.keep_open.update_config(zone.entity_id, zone.name)
+        for valve in self.controller.zones.values():
+            if valve.name == option:
+                self.controller.keep_open.update_config(valve.entity_id, valve.name)
                 return True
         return False
 
     async def async_select_option(self, option: str) -> None:
         if not self.controller or not self.controller.keep_open:
-            _LOGGER.warning("Discharge TRV select: controller not available")
+            _LOGGER.warning("Keep-open valve select: controller not available")
             return
 
         if self._apply_option(option):
             self._attr_current_option = option
-            _LOGGER.info("Discharge TRV set to: %s", option)
+            _LOGGER.info("Keep-open valve set to: %s", option)
         else:
-            _LOGGER.warning("Discharge TRV select: no zone named '%s'", option)
+            _LOGGER.warning("Keep-open valve select: no valve named '%s'", option)
             self._attr_current_option = OPTION_OFF
 
         # Move the hold now instead of waiting for the next control cycle
@@ -186,7 +199,7 @@ class ZoneExternalTempSelect(MultiTRVHeatingSelect):
 
 
 class MultiTRVHeatingSelectManager:
-    """Creates all MultiTRVHeating select entities (the discharge TRV and one external temperature sensor per zone)."""
+    """Creates all MultiTRVHeating select entities (the keep-open valve and one external temperature sensor per zone)."""
 
     def __init__(self, controller, entry_id: Optional[str] = None,
                  controller_device: Optional[Any] = None,
@@ -195,13 +208,13 @@ class MultiTRVHeatingSelectManager:
         self.entry_id = entry_id
         self.controller_device = controller_device
         self.hass = hass
-        self.select_entities = [DischargeTRVSelect(controller, entry_id, controller_device, hass)]
+        self.select_entities = [KeepOpenValveSelect(controller, entry_id, controller_device, hass)]
         self.select_entities += [
             ZoneExternalTempSelect(
                 zone, controller, entry_id,
                 zone_device_info(entry_id, zone_entity_id, zone.name) if entry_id else None, hass,
             )
-            for zone_entity_id, zone in controller.zones.items()
+            for zone_entity_id, zone in controller.rooms.items()
         ]
 
     def get_all_entities(self) -> list:

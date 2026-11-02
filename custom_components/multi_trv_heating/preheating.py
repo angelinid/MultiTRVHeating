@@ -130,7 +130,7 @@ class PreheatingController:
     def _get_max_high_priority_thermal_load(self) -> float:
         """Max of temp_error * floor_area over high-priority zones below target (°C·m²)."""
         max_load = 0.0
-        for zone in self.master_controller.zones.values():
+        for zone in self.master_controller.rooms.values():
             if zone.is_high_priority and zone.current_error > 0:
                 max_load = max(max_load, zone.current_error * zone.floor_area_m2)
         return max_load

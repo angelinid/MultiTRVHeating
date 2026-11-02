@@ -18,7 +18,7 @@ MINUTE = 60
 
 def house(high_boosted: bool = False) -> SimHouse:
     """Four rooms, all at or above their target (nothing wants heat); 'kitchen' is the one we boost."""
-    s = SimHouse(discharge='leo', hold_writes=True)
+    s = SimHouse(keep_open='leo', hold_writes=True)
     s.add('leo', temp=20.5, setpoint=19.0, high=False)
     s.add('living', temp=20.5, setpoint=19.0, high=False)
     s.add('kitchen', temp=22.0, setpoint=19.0, high=high_boosted)

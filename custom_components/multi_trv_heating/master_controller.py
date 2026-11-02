@@ -39,12 +39,16 @@ try:
     from .const import LOGGER_NAME, MAX_FLOW_TEMP, MIN_FLOW_TEMP
     from .keep_open import BOILER_PUMP_OVERRUN, KeepOpenController
     from .preheating import PreheatingController
+    from .zone import Zone
     from .zone_wrapper import HOLD_TEMP_OFFSET, ZoneWrapper
+    from .zones_config import legacy_keep_open, normalize_zone_configs
 except ImportError:
     from const import LOGGER_NAME, MAX_FLOW_TEMP, MIN_FLOW_TEMP
     from keep_open import BOILER_PUMP_OVERRUN, KeepOpenController
     from preheating import PreheatingController
+    from zone import Zone
     from zone_wrapper import HOLD_TEMP_OFFSET, ZoneWrapper
+    from zones_config import legacy_keep_open, normalize_zone_configs
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -64,6 +68,7 @@ TICK_SECONDS = 30
 # Calibration writes: the actuators are slow and battery powered.
 MIN_OFFSET_WRITE_INTERVAL = 120.0   # between non-urgent writes to one TRV
 ECHO_GRACE = 300.0                  # wait this long for the device to report a new calibration (it takes 2-3 min)
+TARGET_PENDING_TIMEOUT = 600.0      # a written setpoint is ignored-against for this long (valves report slowly)
 STARTUP_GRACE = 120.0               # after a restart, wait this long at most for every valve to report
 MAX_DRIFT_RETRIES = 3               # rewrite a calibration that does not stick this many times
 
@@ -89,9 +94,11 @@ class MasterController:
     5. command the boiler
     """
 
-    def __init__(self, hass: "HomeAssistant", zone_configs: list[dict]) -> None:
+    def __init__(self, hass: "HomeAssistant", zone_configs: list[dict],
+                 keep_open_valve: Optional[str] = None) -> None:
         self.hass = hass
-        self.zones: dict[str, ZoneWrapper] = {}
+        self.zones: dict[str, ZoneWrapper] = {}   # the valves, by climate entity id
+        self.rooms: dict[str, Zone] = {}          # the zones (rooms), by zone id
 
         # Master enable switch for the whole component (set by ComponentEnableSwitch).
         self.component_enabled = False
@@ -106,11 +113,9 @@ class MasterController:
 
         self.preheating = PreheatingController(self)
 
-        # Keep-open settings live on the first zone's config.
-        first = zone_configs[0] if zone_configs else {}
-        self.keep_open = KeepOpenController(
-            self, first.get('discharge_trv_entity_id'), first.get('discharge_trv_name')
-        )
+        # The keep-open valve: passed in, or (config version 1) stored on the first entry.
+        legacy_id, legacy_name = legacy_keep_open(zone_configs)
+        self.keep_open = KeepOpenController(self, keep_open_valve or legacy_id, legacy_name)
 
         # Last commanded OpenTherm flow temperature (for sensor reporting). Starts "on" because
         # the boiler state at startup is unknown: the first OFF decision then counts as a stop.
@@ -126,45 +131,57 @@ class MasterController:
         self._unsubscribers: list[Callable[[], None]] = []
         self._ext_unsubscribe: Optional[Callable[[], None]] = None
 
-        for config in zone_configs:
-            zone = ZoneWrapper(
-                my_master_controller=self,
-                entity_id=config['entity_id'],
-                name=config.get('name', config['entity_id']),
-                floor_area_m2=config.get('area', 0.0),
-                is_high_priority=config.get('is_high_priority', True),
-                trv_position_entity_id=config.get('trv_position_entity_id'),
-                temp_calib_entity_id=config.get('temp_calib_entity_id'),
-                ext_temp_entity_id=config.get('ext_temp_entity_id'),
+        for zone_config in normalize_zone_configs(zone_configs):
+            valves = []
+            for config in zone_config['valves']:
+                valve = ZoneWrapper(
+                    my_master_controller=self,
+                    entity_id=config['entity_id'],
+                    name=config.get('name', config['entity_id']),
+                    trv_position_entity_id=config.get('trv_position_entity_id'),
+                    temp_calib_entity_id=config.get('temp_calib_entity_id'),
+                )
+                self.zones[valve.entity_id] = valve
+                valve.boost_entity_id = config.get('boost_entity_id') or self._find_boost_switch(valve.entity_id)
+                if valve.boost_entity_id:
+                    valve.boost_reader = lambda eid=valve.boost_entity_id: self._switch_is_on(eid)
+                else:
+                    _LOGGER.warning("Valve '%s': no boost switch found on its device - boost is not detected", valve.name)
+                valves.append(valve)
+            zone = Zone(
+                zone_config['zone_id'], zone_config['name'], valves,
+                floor_area_m2=zone_config.get('area', 0.0),
+                is_high_priority=zone_config.get('is_high_priority', True),
+                ext_temp_entity_id=zone_config.get('ext_temp_entity_id'),
             )
-            self.zones[zone.entity_id] = zone
-            zone.boost_entity_id = config.get('boost_entity_id') or self._find_boost_switch(zone.entity_id)
-            if zone.boost_entity_id:
-                zone.boost_reader = lambda eid=zone.boost_entity_id: self._switch_is_on(eid)
-            else:
-                _LOGGER.warning("Zone '%s': no boost switch found on its device - boost is not detected", zone.name)
+            self.rooms[zone.zone_id] = zone
             _LOGGER.info(
-                "Registered zone '%s' (%s, area=%.1f m², priority=%s, position_sensor=%s, "
-                "calib_entity=%s, external_temp=%s)",
-                zone.name, zone.entity_id, zone.floor_area_m2,
-                "HIGH" if zone.is_high_priority else "LOW",
-                zone.trv_position_entity_id or "none", zone.temp_calib_entity_id or "none",
-                zone.ext_temp_entity_id or "none",
+                "Registered zone '%s' (area=%.1f m², priority=%s, external_temp=%s) with %d valve(s): %s",
+                zone.name, zone.floor_area_m2, "HIGH" if zone.is_high_priority else "LOW",
+                zone.ext_temp_entity_id or "none", len(valves),
+                ", ".join(f"{v.name} ({v.entity_id})" for v in valves),
             )
+
+        # Name of the keep-open valve, for display
+        keep = self.zones.get(self.keep_open.keep_valve_id or "")
+        if keep:
+            self.keep_open.keep_valve_name = keep.name
 
         self.monitored_climate_entities = list(self.zones)
         self.monitored_position_sensors = [
             z.trv_position_entity_id for z in self.zones.values() if z.trv_position_entity_id
         ]
-        self.monitored_external_sensors = [
-            z.ext_temp_entity_id for z in self.zones.values() if z.ext_temp_entity_id
-        ]
+        self.monitored_external_sensors = self._external_sensors()
         self.monitored_calibration_entities = [
             z.temp_calib_entity_id for z in self.zones.values() if z.temp_calib_entity_id
         ]
         self.monitored_boost_switches = [
             z.boost_entity_id for z in self.zones.values() if z.boost_entity_id
         ]
+
+    def _external_sensors(self) -> list[str]:
+        """The external temperature sensors of all zones (each once)."""
+        return list(dict.fromkeys(z.ext_temp_entity_id for z in self.rooms.values() if z.ext_temp_entity_id))
 
     def _find_boost_switch(self, climate_entity_id: str) -> Optional[str]:
         """The 'Boost heating' switch on the same device as the climate entity (entity registry)."""
@@ -235,7 +252,7 @@ class MasterController:
                 self.hass, self.monitored_external_sensors, self._async_external_temp_change
             )
 
-    def set_external_sensor(self, zone: ZoneWrapper, entity_id: Optional[str]) -> None:
+    def set_external_sensor(self, zone: Zone, entity_id: Optional[str]) -> None:
         """Use `entity_id` (or none) as the zone's external temperature sensor, from now on."""
         entity_id = entity_id or None
         if zone.ext_temp_entity_id == entity_id:
@@ -243,14 +260,13 @@ class MasterController:
         _LOGGER.info("Zone '%s': external temperature sensor %s -> %s",
                      zone.name, zone.ext_temp_entity_id or "none", entity_id or "none")
         zone.set_external_sensor(entity_id)
-        self.monitored_external_sensors = [
-            z.ext_temp_entity_id for z in self.zones.values() if z.ext_temp_entity_id
-        ]
+        self.monitored_external_sensors = self._external_sensors()
         if entity_id:
             states = getattr(self.hass, "states", None)
             value = self._parse_state(states.get(entity_id)) if states is not None else None
             if value is not None:
-                zone.update_external_temperature(value)
+                for valve in zone.valves:
+                    valve.update_external_temperature(value)
         self._subscribe_external_sensors()
 
     async def async_stop_listening(self) -> None:
@@ -321,8 +337,83 @@ class MasterController:
         zone = self.zones.get(event.data.get('entity_id'))
         if zone and new_state:
             zone.update_from_state(new_state)
+            if zone.zone is not None:
+                await self._adopt_target(zone.zone, zone)
 
         await self._calculate_and_command()
+
+    async def _adopt_target(self, zone: Zone, valve: ZoneWrapper) -> None:
+        """
+        A valve reported its setpoint. Our own writes are ignored until the valve reports them (or
+        TARGET_PENDING_TIMEOUT); a valve that was offline is brought to the zone target; any other
+        change made outside (dial, Z2M, a scene) is adopted by the zone, last writer wins, and the
+        other valves are brought to it.
+        """
+        if not valve.has_reading:
+            return
+        reported = valve.target_temp
+        now = self.now()
+        pending = zone.pending_targets.get(valve.entity_id)
+        if pending:
+            value, written_at = pending
+            if abs(reported - value) <= 0.01 or now - written_at > TARGET_PENDING_TIMEOUT:
+                zone.pending_targets.pop(valve.entity_id, None)
+                valve._refresh_temperature(cascade=False)
+            else:
+                return
+        if zone.desired_target is None:
+            zone.desired_target = reported
+            return
+        if valve.just_returned:
+            valve.just_returned = False
+            if abs(reported - zone.desired_target) > 0.01:
+                await self._write_valve_target(zone, valve, zone.desired_target)
+            return
+        if abs(reported - zone.desired_target) > 0.01:
+            _LOGGER.info("Zone '%s': target %.1f -> %.1f (set on '%s')",
+                         zone.name, zone.desired_target, reported, valve.name)
+            zone.desired_target = reported
+            await self._sync_targets(zone, except_valve=valve)
+
+    async def _write_valve_target(self, zone: Zone, valve: ZoneWrapper, value: float) -> None:
+        zone.pending_targets[valve.entity_id] = (value, self.now())
+        valve._refresh_temperature(cascade=False)
+        await self.hass.services.async_call(
+            "climate", "set_temperature", {"entity_id": valve.entity_id, "temperature": value}, blocking=False
+        )
+
+    async def _sync_targets(self, zone: Zone, except_valve: Optional[ZoneWrapper] = None) -> None:
+        """Write the zone target to every available valve that does not have it."""
+        for valve in zone.valves:
+            if valve is except_valve or not valve.available:
+                continue
+            if abs(valve.target_temp - zone.desired_target) > 0.01 or valve.entity_id in zone.pending_targets:
+                await self._write_valve_target(zone, valve, zone.desired_target)
+
+    async def async_set_zone_target(self, zone: Zone, value: float) -> None:
+        """Set the zone's target on all of its valves."""
+        zone.desired_target = float(value)
+        for valve in zone.valves:
+            if valve.available:
+                await self._write_valve_target(zone, valve, float(value))
+        await self._calculate_and_command()
+
+    async def async_set_zone_hvac_mode(self, zone: Zone, mode: str) -> None:
+        """Set the hvac mode on all available valves of the zone."""
+        for valve in zone.valves:
+            if valve.available:
+                await self.hass.services.async_call(
+                    "climate", "set_hvac_mode", {"entity_id": valve.entity_id, "hvac_mode": mode}, blocking=False
+                )
+
+    async def async_boost_zone(self, zone: Zone) -> None:
+        """Start the TRV boost on all valves of the zone (the only way a zone starts one)."""
+        for valve in zone.valves:
+            if valve.boost_entity_id:
+                await self.hass.services.async_call(
+                    "switch", "turn_on", {"entity_id": valve.boost_entity_id}, blocking=False
+                )
+        _LOGGER.info("Zone '%s': boost started on %d valve(s)", zone.name, len(zone.valves))
 
     async def _async_position_change(self, event) -> None:
         """TRV position sensor changed: update the measured valve opening and recalculate."""
@@ -343,12 +434,13 @@ class MasterController:
         """External temperature sensor changed: store the reading and recalculate."""
         entity_id = event.data.get('entity_id')
         new_state = event.data.get('new_state')
-        zone = self._zone_for_sensor('ext_temp_entity_id', entity_id) if new_state else None
+        valves = [v for v in self.zones.values() if v.ext_temp_entity_id == entity_id] if new_state else []
 
-        if zone:
-            ext_temp = self._read_float_state(zone, new_state, entity_id, "external temperature")
+        if valves:
+            ext_temp = self._read_float_state(valves[0], new_state, entity_id, "external temperature")
             if ext_temp is not None:
-                zone.update_external_temperature(ext_temp)
+                for valve in valves:
+                    valve.update_external_temperature(ext_temp)
                 await self._calculate_and_command()
 
     async def _async_calibration_change(self, event) -> None:
@@ -379,18 +471,19 @@ class MasterController:
     # Holds
     # ------------------------------------------------------------------
 
-    def apply_hold(self, zone: ZoneWrapper, reason: str, active: bool, now: float) -> bool:
+    def apply_hold(self, zone: "Zone | ZoneWrapper", reason: str, active: bool, now: float) -> bool:
         """Add/remove a hold reason on a zone (offsets are written by the next sync)."""
-        return zone.set_hold(reason, active, now)
+        return any([v.set_hold(reason, active, now) for v in getattr(zone, "valves", [zone])])
 
-    async def async_set_zone_hold(self, zone: ZoneWrapper, reason: str, active: bool) -> None:
-        """Hold a zone's valve open (or release it) on request, e.g. from the hold switch."""
-        self.apply_hold(zone, reason, active, self.now())
+    async def async_set_zone_hold(self, zone: "Zone | ZoneWrapper", reason: str, active: bool) -> None:
+        """Hold a zone's valves open (or release them) on request, e.g. from the hold switch."""
+        for valve in getattr(zone, "valves", [zone]):
+            self.apply_hold(valve, reason, active, self.now())
         _LOGGER.info("Zone '%s': %s hold %s", zone.name, reason, "on" if active else "off")
         await self._calculate_and_command()
 
     async def async_set_keep_open_valve(self, entity_id: Optional[str], name: Optional[str]) -> None:
-        """Select the keep-open (discharge) valve; the hold moves to it on the spot."""
+        """Select the keep-open valve; the hold moves to it on the spot."""
         self.keep_open.update_config(entity_id, name)
         await self._calculate_and_command()
 
@@ -448,15 +541,18 @@ class MasterController:
         low_priority_count = 0
         low_priority_max_demand = 0.0
 
-        for zone in self.zones.values():
-            demand = zone.get_demand_metric()
-            if zone.counts_as_high_priority:
-                high_priority_demanding = high_priority_demanding or zone.is_demanding_heat
-                high_priority_demand = max(high_priority_demand, demand)
-            else:
-                low_priority_aggregate += zone.effective_opening
+        for room in self.rooms.values():
+            valves = room.active_valves
+            high = [v for v in valves if v.counts_as_high_priority]
+            low = [v for v in valves if not v.counts_as_high_priority]
+            if high:
+                high_priority_demanding = high_priority_demanding or any(v.is_demanding_heat for v in high)
+                high_priority_demand = max(high_priority_demand, max(v.get_demand_metric() for v in high))
+            if low:
+                # A zone counts once, whatever its number of valves
+                low_priority_aggregate += max(v.effective_opening for v in low)
                 low_priority_count += 1
-                low_priority_max_demand = max(low_priority_max_demand, demand)
+                low_priority_max_demand = max(low_priority_max_demand, max(v.get_demand_metric() for v in low))
 
         if high_priority_demanding:
             return True, high_priority_demand, "high-priority demand"
@@ -640,14 +736,14 @@ class MasterController:
         return {
             "zones": [
                 {"name": z.name, "entity_id": z.entity_id, "state": z.export_zone_state()}
-                for z in self.zones.values()
+                for z in self.rooms.values()
             ],
-            "zone_count": len(self.zones),
+            "zone_count": len(self.rooms),
             "current_flow_temp": self.current_flow_temp,
             "keep_open": self.keep_open.get_state(),
         }
 
     def get_zone_state(self, entity_id: str) -> Optional[dict]:
         """Snapshot of one zone's state, or None if unknown."""
-        zone = self.zones.get(entity_id)
+        zone = self.rooms.get(entity_id)
         return zone.export_zone_state() if zone else None

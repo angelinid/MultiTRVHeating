@@ -294,7 +294,7 @@ async def async_setup_entry(
             zone.name, zone_entity_id, zone, entry.entry_id,
             zone_device_info(entry.entry_id, zone_entity_id, zone.name), hass,
         )
-        for zone_entity_id, zone in controller.zones.items()
+        for zone_entity_id, zone in controller.rooms.items()
     )
 
     async_add_entities(numbers, update_before_add=True)

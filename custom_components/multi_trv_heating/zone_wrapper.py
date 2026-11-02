@@ -96,8 +96,13 @@ class ZoneWrapper:
                  my_master_controller: Optional['MasterController'] = None) -> None:
         self.entity_id = entity_id
         self.name = name
-        self.floor_area_m2 = floor_area_m2
-        self.is_high_priority = is_high_priority
+        self.zone = None                     # the Zone this valve belongs to (shared settings live there)
+        self._floor_area_m2 = floor_area_m2
+        self._is_high_priority = is_high_priority
+        self.available = True                # False while the climate entity is unavailable/unknown
+        self.has_reading = False             # the TRV has reported a temperature
+        self.hvac_state = 'heat'             # the climate entity's state ('heat', 'off', ...)
+        self.just_returned = False           # came back from unavailable; the zone re-syncs its target
 
         # Temperatures (°C); current_temp is the effective temperature (see class docstring),
         # trv_temp what the TRV reported (includes its calibration offset).
@@ -107,8 +112,8 @@ class ZoneWrapper:
         self.target_temp = 20.0
         self.current_error = 0.0
 
-        # Optional external temperature sensor
-        self.ext_temp_entity_id = ext_temp_entity_id
+        # Optional external temperature sensor (shared by the zone)
+        self._ext_temp_entity_id = ext_temp_entity_id
         self.ext_current_temp: Optional[float] = None   # None until the sensor reports
         self.ext_last_update = 0.0
 
@@ -143,6 +148,38 @@ class ZoneWrapper:
 
         self.last_update_time = time.time()
         self.master_controller = my_master_controller
+
+    # --- settings shared with the zone ---------------------------------
+
+    @property
+    def is_high_priority(self) -> bool:
+        return self.zone.is_high_priority if self.zone else self._is_high_priority
+
+    @is_high_priority.setter
+    def is_high_priority(self, value: bool) -> None:
+        if self.zone:
+            self.zone.is_high_priority = value
+        self._is_high_priority = value
+
+    @property
+    def floor_area_m2(self) -> float:
+        return self.zone.floor_area_m2 if self.zone else self._floor_area_m2
+
+    @floor_area_m2.setter
+    def floor_area_m2(self, value: float) -> None:
+        if self.zone:
+            self.zone.floor_area_m2 = value
+        self._floor_area_m2 = value
+
+    @property
+    def ext_temp_entity_id(self) -> Optional[str]:
+        return self.zone.ext_temp_entity_id if self.zone else self._ext_temp_entity_id
+
+    @ext_temp_entity_id.setter
+    def ext_temp_entity_id(self, value: Optional[str]) -> None:
+        if self.zone:
+            self.zone.ext_temp_entity_id = value
+        self._ext_temp_entity_id = value
 
     # ------------------------------------------------------------------
     # Hold (valve forced open)
@@ -250,6 +287,12 @@ class ZoneWrapper:
 
     def update_from_state(self, new_state) -> None:
         """Update current/target temperature from a climate entity state."""
+        if new_state is not None and new_state.state in ("unavailable", "unknown"):
+            if self.available:
+                self.available = False
+                if self.zone:
+                    self.zone.refresh_others(self)   # the others no longer count this valve
+            return
         if not new_state or not new_state.attributes:
             _LOGGER.warning("Received invalid state for zone '%s'", self.name)
             return
@@ -263,8 +306,13 @@ class ZoneWrapper:
             if target is None:
                 target = new_state.state
 
+            if not self.available:
+                self.just_returned = True
+            self.available = True
+            self.hvac_state = new_state.state
             if current is not None:
                 self.trv_temp = float(current)
+                self.has_reading = True
             if target is not None:
                 self.target_temp = float(target)
 
@@ -337,6 +385,10 @@ class ZoneWrapper:
     def set_external_sensor(self, entity_id: Optional[str]) -> None:
         """Switch to another external sensor (or none); the old sensor's reading no longer counts."""
         self.ext_temp_entity_id = entity_id
+        self.reset_external_reading()
+
+    def reset_external_reading(self) -> None:
+        """Forget the external sensor's reading (another sensor was chosen)."""
         self.ext_current_temp = None
         self.ext_last_update = 0.0
         self._refresh_temperature()
@@ -387,16 +439,34 @@ class ZoneWrapper:
             and time.time() - self.ext_last_update <= EXT_TEMP_MAX_AGE
         )
 
-    def _refresh_temperature(self) -> None:
-        """Recompute effective temperature, error and demand from the latest readings."""
+    def effective_target(self) -> float:
+        """The setpoint decisions use: the zone's value while a write to this valve is in flight, else its own."""
+        if self.zone and self.entity_id in self.zone.pending_targets:
+            return self.zone.pending_targets[self.entity_id][0]
+        return self.target_temp
+
+    def compensated_reading(self) -> float:
+        """This TRV's own temperature reading with our calibration offset removed."""
+        return self.trv_temp - self.applied_offset() if TRV_REPORTS_CALIBRATED_TEMP else self.trv_temp
+
+    def _refresh_temperature(self, cascade: bool = True) -> None:
+        """
+        Recompute effective temperature, error and demand from the latest readings.
+
+        The zone temperature is the external sensor while fresh, else the average of the zone's
+        valves (this one alone in a one-valve zone). `cascade` also refreshes the sibling valves.
+        """
+        average = self.zone.valve_average() if self.zone and len(self.zone.valves) > 1 else None
         if self.has_fresh_external_temperature():
             self.current_temp = self.ext_current_temp
-        elif TRV_REPORTS_CALIBRATED_TEMP:
-            self.current_temp = self.trv_temp - self.applied_offset()
+        elif average is not None:
+            self.current_temp = average
         else:
-            self.current_temp = self.trv_temp
-        self.current_error = self.target_temp - self.current_temp
+            self.current_temp = self.compensated_reading()
+        self.current_error = self.effective_target() - self.current_temp
         self._update_demand_metric()
+        if cascade and self.zone and len(self.zone.valves) > 1:
+            self.zone.refresh_others(self)
 
     def _update_demand_metric(self) -> None:
         """Recalculate is_demanding_heat from priority, temperature error and valve state."""
