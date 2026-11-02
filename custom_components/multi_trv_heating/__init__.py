@@ -33,6 +33,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, LOGGER_NAME, PLATFORMS
 from .master_controller import MasterController
+from .options import zones_with_options
 from .storage import StateStorage, set_storage
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -48,10 +49,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await storage.async_load()
     set_storage(storage)
 
-    controller = MasterController(hass, entry.data.get("zones", []))
+    controller = MasterController(hass, zones_with_options(entry.data.get("zones", []), entry.options))
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = controller
 
     await controller.async_start_listening()
+    # A changed option (external sensor) takes effect by reloading the entry.
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     # Entities group themselves into devices via matching DeviceInfo identifiers.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -65,3 +68,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if controller is not None:
         await controller.async_stop_listening()
     return unload_ok
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)

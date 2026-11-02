@@ -25,8 +25,10 @@ SOFTWARE.
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.core import callback
 from homeassistant.helpers import selector
 
+from .options import OPT_EXT_TEMP
 from .const import (
     CONF_AREA,
     CONF_DISCHARGE_TRV_ENTITY_ID,
@@ -74,6 +76,36 @@ DATA_SCHEMA = vol.Schema({
 })
 
 
+class OptionsFlowHandler(config_entries.OptionsFlow):
+    """Change the external temperature sensor of each zone after setup."""
+
+    async def async_step_init(self, user_input=None):
+        zones = self.config_entry.data.get("zones", [])
+        # One field per zone, keyed by the zone name shown in the form.
+        names = {z.get(CONF_NAME) or z[CONF_ENTITY_ID]: z[CONF_ENTITY_ID] for z in zones}
+
+        if user_input is not None:
+            # An emptied field comes back absent: stored as "" so it overrides the setup value.
+            overrides = {entity_id: user_input.get(name) or "" for name, entity_id in names.items()}
+            return self.async_create_entry(data={**self.config_entry.options, OPT_EXT_TEMP: overrides})
+
+        current = self.config_entry.options.get(OPT_EXT_TEMP) or {}
+        suggested = {}
+        for zone in zones:
+            entity_id = zone[CONF_ENTITY_ID]
+            sensor = current[entity_id] if entity_id in current else zone.get(CONF_EXT_TEMP_ENTITY_ID)
+            if sensor:
+                suggested[zone.get(CONF_NAME) or entity_id] = sensor
+        schema = vol.Schema({
+            vol.Optional(name): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+            for name in names
+        })
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),
+        )
+
+
 class OpenThermConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """
     Handle config flow for the Multi-TRV Heating MasterController.
@@ -91,6 +123,11 @@ class OpenThermConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return OptionsFlowHandler()
 
     # Internal list to store zone configurations as the user adds them
     # This is cleared after config entry creation
