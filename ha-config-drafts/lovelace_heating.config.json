@@ -24,75 +24,44 @@
           ]
         },
         {
-          "type": "entities",
-          "title": "Heating controller",
-          "entities": [
-            {
-              "entity": "select.multi_trv_heating_controller_keep_open_valve",
-              "name": "Keep-open valve"
-            },
-            {
-              "entity": "sensor.opentherm_flow_temperature",
-              "name": "Flow temperature"
-            }
-          ]
-        },
-        {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
+          "type": "vertical-stack",
           "cards": [
             {
-              "type": "thermostat",
-              "entity": "climate.bedroom_1_heating_thermostat",
-              "name": "Bedroom 1"
+              "type": "gauge",
+              "entity": "sensor.opentherm_flow_temperature",
+              "name": "Boiler flow temperature",
+              "min": 0,
+              "max": 60,
+              "needle": true,
+              "segments": [
+                {
+                  "from": 0,
+                  "color": "#43a047"
+                },
+                {
+                  "from": 25,
+                  "color": "#9ccc65"
+                },
+                {
+                  "from": 35,
+                  "color": "#fdd835"
+                },
+                {
+                  "from": 45,
+                  "color": "#fb8c00"
+                },
+                {
+                  "from": 55,
+                  "color": "#e53935"
+                }
+              ]
             },
             {
               "type": "entities",
               "entities": [
                 {
-                  "type": "section",
-                  "label": "Bedroom 1"
-                },
-                {
-                  "entity": "switch.radiator_1_bedroom_boost_heating",
-                  "name": "Boost"
-                },
-                {
-                  "entity": "switch.bedroom_1_heating_bedroom_1_hold_open",
-                  "name": "Hold open"
-                },
-                {
-                  "entity": "sensor.radiator_1_bedroom_battery"
-                },
-                {
-                  "entity": "sensor.radiator_1_bedroom_position"
-                },
-                {
-                  "type": "section",
-                  "label": "Bedroom 2 Heating"
-                },
-                {
-                  "entity": "switch.radiator_2_bedroom_boost_heating",
-                  "name": "Boost"
-                },
-                {
-                  "entity": "switch.bedroom_2_heating_hold_open",
-                  "name": "Hold open"
-                },
-                {
-                  "entity": "sensor.radiator_2_bedroom_battery"
-                },
-                {
-                  "entity": "sensor.radiator_2_bedroom_position"
-                },
-                {
-                  "type": "section",
-                  "label": "Zone"
-                },
-                {
-                  "entity": "select.bedroom_1_heating_external_temperature_sensor",
-                  "name": "Room sensor"
+                  "entity": "select.multi_trv_heating_controller_keep_open_valve",
+                  "name": "Keep-open valve"
                 }
               ]
             }
@@ -116,114 +85,32 @@
                   "label": "Living Room Heating"
                 },
                 {
+                  "entity": "sensor.radiator_1_living_room_battery",
+                  "name": "Battery"
+                },
+                {
+                  "entity": "sensor.radiator_1_living_room_position",
+                  "name": "Open"
+                },
+                {
                   "entity": "switch.radiator_1_living_room_boost_heating",
                   "name": "Boost"
-                },
-                {
-                  "entity": "switch.living_room_heating_hold_open",
-                  "name": "Hold open"
-                },
-                {
-                  "entity": "sensor.radiator_1_living_room_battery"
-                },
-                {
-                  "entity": "sensor.radiator_1_living_room_position"
                 },
                 {
                   "type": "section",
                   "label": "TV Room Heat"
                 },
                 {
+                  "entity": "sensor.radiator_tv_room_battery",
+                  "name": "Battery"
+                },
+                {
+                  "entity": "sensor.radiator_tv_room_position",
+                  "name": "Open"
+                },
+                {
                   "entity": "switch.radiator_tv_room_boost_heating",
                   "name": "Boost"
-                },
-                {
-                  "entity": "switch.tv_room_heat_hold_open",
-                  "name": "Hold open"
-                },
-                {
-                  "entity": "sensor.radiator_tv_room_battery"
-                },
-                {
-                  "entity": "sensor.radiator_tv_room_position"
-                },
-                {
-                  "type": "section",
-                  "label": "Zone"
-                },
-                {
-                  "entity": "select.living_room_heating_external_temperature_sensor",
-                  "name": "Room sensor"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
-          "cards": [
-            {
-              "type": "thermostat",
-              "entity": "climate.bathroom_heating_thermostat",
-              "name": "Bathroom Heating"
-            },
-            {
-              "type": "entities",
-              "entities": [
-                {
-                  "entity": "switch.radiator_bathroom_boost_heating",
-                  "name": "Boost"
-                },
-                {
-                  "entity": "switch.bathroom_heating_hold_open",
-                  "name": "Hold open"
-                },
-                {
-                  "entity": "sensor.radiator_bathroom_battery"
-                },
-                {
-                  "entity": "sensor.radiator_bathroom_position"
-                },
-                {
-                  "entity": "select.bathroom_heating_external_temperature_sensor",
-                  "name": "Room sensor"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "square": false,
-          "columns": 1,
-          "type": "grid",
-          "cards": [
-            {
-              "type": "thermostat",
-              "entity": "climate.ensuite_heating_thermostat",
-              "name": "Ensuite Heating"
-            },
-            {
-              "type": "entities",
-              "entities": [
-                {
-                  "entity": "switch.radiator_ensuite_boost_heating",
-                  "name": "Boost"
-                },
-                {
-                  "entity": "switch.ensuite_heating_hold_open",
-                  "name": "Hold open"
-                },
-                {
-                  "entity": "sensor.radiator_ensuite_battery"
-                },
-                {
-                  "entity": "sensor.radiator_ensuite_position"
-                },
-                {
-                  "entity": "select.ensuite_heating_external_temperature_sensor",
-                  "name": "Room sensor"
                 }
               ]
             }
@@ -247,44 +134,32 @@
                   "label": "Hall Heating"
                 },
                 {
+                  "entity": "sensor.radiator_hall_battery",
+                  "name": "Battery"
+                },
+                {
+                  "entity": "sensor.radiator_hall_position",
+                  "name": "Open"
+                },
+                {
                   "entity": "switch.radiator_hall_boost_heating",
                   "name": "Boost"
-                },
-                {
-                  "entity": "switch.hall_heating_hold_open",
-                  "name": "Hold open"
-                },
-                {
-                  "entity": "sensor.radiator_hall_battery"
-                },
-                {
-                  "entity": "sensor.radiator_hall_position"
                 },
                 {
                   "type": "section",
                   "label": "Kitchen Heat"
                 },
                 {
+                  "entity": "sensor.radiator_kitchen_battery",
+                  "name": "Battery"
+                },
+                {
+                  "entity": "sensor.radiator_kitchen_position",
+                  "name": "Open"
+                },
+                {
                   "entity": "switch.radiator_kitchen_boost_heating",
                   "name": "Boost"
-                },
-                {
-                  "entity": "switch.kitchen_heat_hold_open",
-                  "name": "Hold open"
-                },
-                {
-                  "entity": "sensor.radiator_kitchen_battery"
-                },
-                {
-                  "entity": "sensor.radiator_kitchen_position"
-                },
-                {
-                  "type": "section",
-                  "label": "Zone"
-                },
-                {
-                  "entity": "select.hall_heating_external_temperature_sensor",
-                  "name": "Room sensor"
                 }
               ]
             }
@@ -304,22 +179,123 @@
               "type": "entities",
               "entities": [
                 {
+                  "entity": "sensor.radiator_leo_battery",
+                  "name": "Battery"
+                },
+                {
+                  "entity": "sensor.radiator_leo_position",
+                  "name": "Open"
+                },
+                {
                   "entity": "switch.radiator_leo_boost_heating",
+                  "name": "Boost"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "square": false,
+          "columns": 1,
+          "type": "grid",
+          "cards": [
+            {
+              "type": "thermostat",
+              "entity": "climate.bathroom_heating_thermostat",
+              "name": "Bathroom Heating"
+            },
+            {
+              "type": "entities",
+              "entities": [
+                {
+                  "entity": "sensor.radiator_bathroom_battery",
+                  "name": "Battery"
+                },
+                {
+                  "entity": "sensor.radiator_bathroom_position",
+                  "name": "Open"
+                },
+                {
+                  "entity": "switch.radiator_bathroom_boost_heating",
+                  "name": "Boost"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "square": false,
+          "columns": 1,
+          "type": "grid",
+          "cards": [
+            {
+              "type": "thermostat",
+              "entity": "climate.bedroom_1_heating_thermostat",
+              "name": "Bedroom 1"
+            },
+            {
+              "type": "entities",
+              "entities": [
+                {
+                  "type": "section",
+                  "label": "Bedroom 1"
+                },
+                {
+                  "entity": "sensor.radiator_1_bedroom_battery",
+                  "name": "Battery"
+                },
+                {
+                  "entity": "sensor.radiator_1_bedroom_position",
+                  "name": "Open"
+                },
+                {
+                  "entity": "switch.radiator_1_bedroom_boost_heating",
                   "name": "Boost"
                 },
                 {
-                  "entity": "switch.leos_heat_hold_open",
-                  "name": "Hold open"
+                  "type": "section",
+                  "label": "Bedroom 2 Heating"
                 },
                 {
-                  "entity": "sensor.radiator_leo_battery"
+                  "entity": "sensor.radiator_2_bedroom_battery",
+                  "name": "Battery"
                 },
                 {
-                  "entity": "sensor.radiator_leo_position"
+                  "entity": "sensor.radiator_2_bedroom_position",
+                  "name": "Open"
                 },
                 {
-                  "entity": "select.leos_heat_external_temperature_sensor",
-                  "name": "Room sensor"
+                  "entity": "switch.radiator_2_bedroom_boost_heating",
+                  "name": "Boost"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "square": false,
+          "columns": 1,
+          "type": "grid",
+          "cards": [
+            {
+              "type": "thermostat",
+              "entity": "climate.ensuite_heating_thermostat",
+              "name": "Ensuite Heating"
+            },
+            {
+              "type": "entities",
+              "entities": [
+                {
+                  "entity": "sensor.radiator_ensuite_battery",
+                  "name": "Battery"
+                },
+                {
+                  "entity": "sensor.radiator_ensuite_position",
+                  "name": "Open"
+                },
+                {
+                  "entity": "switch.radiator_ensuite_boost_heating",
+                  "name": "Boost"
                 }
               ]
             }
@@ -339,22 +315,16 @@
               "type": "entities",
               "entities": [
                 {
+                  "entity": "sensor.radiator_study_battery",
+                  "name": "Battery"
+                },
+                {
+                  "entity": "sensor.radiator_study_position",
+                  "name": "Open"
+                },
+                {
                   "entity": "switch.radiator_study_boost_heating",
                   "name": "Boost"
-                },
-                {
-                  "entity": "switch.study_heat_hold_open",
-                  "name": "Hold open"
-                },
-                {
-                  "entity": "sensor.radiator_study_battery"
-                },
-                {
-                  "entity": "sensor.radiator_study_position"
-                },
-                {
-                  "entity": "select.study_heat_external_temperature_sensor",
-                  "name": "Room sensor"
                 }
               ]
             }
@@ -374,22 +344,16 @@
               "type": "entities",
               "entities": [
                 {
+                  "entity": "sensor.radiator_toilet_battery",
+                  "name": "Battery"
+                },
+                {
+                  "entity": "sensor.radiator_toilet_position",
+                  "name": "Open"
+                },
+                {
                   "entity": "switch.radiator_toilet_boost_heating",
                   "name": "Boost"
-                },
-                {
-                  "entity": "switch.toilet_heat_hold_open",
-                  "name": "Hold open"
-                },
-                {
-                  "entity": "sensor.radiator_toilet_battery"
-                },
-                {
-                  "entity": "sensor.radiator_toilet_position"
-                },
-                {
-                  "entity": "select.toilet_heat_external_temperature_sensor",
-                  "name": "Room sensor"
                 }
               ]
             }
