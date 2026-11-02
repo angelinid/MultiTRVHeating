@@ -10,19 +10,23 @@ views:
     - entity: sensor.tuya_temperature_sensor_temperature
       name: Parents room
     - entity: sensor.laundry_temperature_temperature
-  - type: horizontal-stack
-    cards:
-    - type: markdown
-      content: |-
-        {% set t = states('sensor.opentherm_flow_temperature') | float(0) %}
-        {% set f = ((t - 25) / 35) | min(1) | max(0) if t > 0 else 0 %}
-        {% set r = [510 * f, 255] | min | int %}
-        {% set g = [510 * (1 - f), 255] | min | int %}
-        {% set n = (f * 10) | round | int %}
-        <font color="{{ '#%02x%02x%02x' | format(r, g, 60) }}">**Flow {{ 'off' if t == 0 else (t | round(1) ~ ' °C') }}** {{ '▮' * n }}{{ '▯' * (10 - n) }}</font>
-    - type: tile
-      entity: select.multi_trv_heating_controller_keep_open_valve
-      name: Keep-open valve
+  - type: gauge
+    entity: sensor.opentherm_flow_temperature
+    name: Boiler flow temperature
+    min: 0
+    max: 60
+    needle: true
+    segments:
+    - from: 0
+      color: '#43a047'
+    - from: 25
+      color: '#9ccc65'
+    - from: 35
+      color: '#fdd835'
+    - from: 45
+      color: '#fb8c00'
+    - from: 55
+      color: '#e53935'
   - type: vertical-stack
     cards:
     - type: tile
